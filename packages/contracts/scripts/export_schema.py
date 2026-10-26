@@ -16,10 +16,17 @@ from nazar_contracts import (
     PIPELINE_STAGES,
     TERMINAL_STATUSES,
     ArtifactManifest,
+    Asset,
+    AssetCreate,
+    AuthState,
+    Credentials,
     EventType,
     HealthResponse,
     JobEvent,
     JobStatus,
+    Mission,
+    MissionCreate,
+    PreflightReport,
     ReadinessResponse,
     StageName,
 )
@@ -38,6 +45,13 @@ class NazarContracts(BaseModel):
     job_status: JobStatus
     stage_name: StageName
     event_type: EventType
+    auth_state: AuthState
+    credentials: Credentials
+    mission: Mission
+    mission_create: MissionCreate
+    asset: Asset
+    asset_create: AssetCreate
+    preflight_report: PreflightReport
 
 
 def _strip_property_titles(schema: dict[str, Any]) -> None:

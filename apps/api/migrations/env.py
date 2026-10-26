@@ -2,14 +2,16 @@ from logging.config import fileConfig
 
 from alembic import context
 
+import nazar_api.models  # noqa: F401 - registers tables on Base.metadata
 from nazar_api.db import Base, get_engine
-from nazar_api.settings import get_settings
+from nazar_api.settings import Settings, get_settings
 
 config = context.config
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
-settings = get_settings()
+# The API passes its own Settings when it migrates on startup; the CLI uses the environment.
+settings: Settings = config.attributes.get("settings") or get_settings()
 settings.storage_path.mkdir(parents=True, exist_ok=True)
 target_metadata = Base.metadata
 

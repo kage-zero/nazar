@@ -4,10 +4,11 @@ import logging
 import uuid
 
 from pydantic import SecretStr
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from nazar_api.db import get_engine
+from nazar_api.models import User
 from nazar_api.settings import Settings
 from nazar_contracts import CheckStatus, ReadinessCheck, ReadinessResponse
 
@@ -70,20 +71,39 @@ def _secret(name: str, value: SecretStr | str | None, purpose: str) -> Readiness
     )
 
 
+def _accounts(settings: Settings) -> ReadinessCheck:
+    try:
+        with get_engine(settings.sqlalchemy_url).connect() as conn:
+            users = conn.execute(select(func.count()).select_from(User)).scalar_one()
+    except SQLAlchemyError as exc:
+        return ReadinessCheck(
+            name="accounts",
+            status=CheckStatus.UNAVAILABLE,
+            detail=f"Accounts table is unreadable ({type(exc).__name__}).",
+            required=True,
+        )
+    if users:
+        return ReadinessCheck(
+            name="accounts",
+            status=CheckStatus.OK,
+            detail="Operator account exists.",
+            required=True,
+        )
+    return ReadinessCheck(
+        name="accounts",
+        status=CheckStatus.NOT_CONFIGURED,
+        detail="No operator account yet. Create one in the web app (first-run setup).",
+        required=True,
+    )
+
+
 def check_readiness(settings: Settings) -> ReadinessResponse:
     checks = [
         _database(settings),
         _storage(settings),
         _secret("NAZAR_SECRET_KEY", settings.secret_key, "Signs artifact links and sessions"),
         _secret("NAZAR_WORKER_TOKEN", settings.worker_token, "Authenticates the GPU worker"),
-        _secret(
-            "NAZAR_BOOTSTRAP_ADMIN_EMAIL", settings.bootstrap_admin_email, "First operator account"
-        ),
-        _secret(
-            "NAZAR_BOOTSTRAP_ADMIN_PASSWORD",
-            settings.bootstrap_admin_password,
-            "First operator password",
-        ),
+        _accounts(settings),
         ReadinessCheck(
             name="worker",
             status=CheckStatus.NOT_IMPLEMENTED,

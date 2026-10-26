@@ -13,9 +13,8 @@ export function checkVideoFile(
   maxBytes: number,
 ): VideoCheck {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-  const looksLikeVideo =
-    file.type.startsWith('video/') || (VIDEO_EXTENSIONS as readonly string[]).includes(ext);
-  if (!looksLikeVideo) {
+  // The server stores uploads by extension, so the extension must be a known one.
+  if (!(VIDEO_EXTENSIONS as readonly string[]).includes(ext)) {
     return {
       ok: false,
       name: file.name,

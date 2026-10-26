@@ -29,6 +29,7 @@ def test_ready_reports_blank_secrets_as_not_configured(tmp_path: Path) -> None:
     assert checks["database"]["status"] == "ok"
     assert checks["storage"]["status"] == "ok"
     assert checks["config:NAZAR_SECRET_KEY"]["status"] == "not_configured"
+    assert checks["accounts"]["status"] == "not_configured"
     assert checks["worker"]["status"] == "not_implemented"
 
 

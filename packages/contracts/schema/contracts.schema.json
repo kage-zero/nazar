@@ -1,5 +1,41 @@
 {
   "$defs": {
+    "AnalysisInfo": {
+      "properties": {
+        "decode_errors": {
+          "type": "integer"
+        },
+        "frames_decoded": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "processing_s": {
+          "type": "number"
+        },
+        "timestamps": {
+          "enum": [
+            "stream",
+            "estimated"
+          ],
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "frames_decoded",
+        "decode_errors",
+        "timestamps",
+        "processing_s"
+      ],
+      "title": "AnalysisInfo",
+      "type": "object"
+    },
     "ArtifactAvailable": {
       "additionalProperties": false,
       "properties": {
@@ -192,6 +228,153 @@
       "title": "ArtifactManifest",
       "type": "object"
     },
+    "Asset": {
+      "properties": {
+        "byte_size": {
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filename": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AssetKind"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessingProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "received_bytes": {
+          "type": "integer"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/AssetStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "kind",
+        "filename",
+        "byte_size",
+        "received_bytes",
+        "status",
+        "error",
+        "progress",
+        "sha256",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "Asset",
+      "type": "object"
+    },
+    "AssetCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "byte_size": {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        "filename": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AssetKind"
+        }
+      },
+      "required": [
+        "kind",
+        "filename",
+        "byte_size"
+      ],
+      "title": "AssetCreate",
+      "type": "object"
+    },
+    "AssetKind": {
+      "enum": [
+        "video",
+        "telemetry"
+      ],
+      "title": "AssetKind",
+      "type": "string"
+    },
+    "AssetStatus": {
+      "enum": [
+        "uploading",
+        "validating",
+        "ready",
+        "rejected",
+        "failed",
+        "cancelled"
+      ],
+      "title": "AssetStatus",
+      "type": "string"
+    },
+    "AuthState": {
+      "description": "`setup_required` is true only while no operator account exists.",
+      "properties": {
+        "setup_required": {
+          "type": "boolean"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserPublic"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "setup_required",
+        "user"
+      ],
+      "title": "AuthState",
+      "type": "object"
+    },
     "Bounds3D": {
       "additionalProperties": false,
       "properties": {
@@ -328,6 +511,28 @@
       "title": "CoordinateFrame",
       "type": "object"
     },
+    "Credentials": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+          "type": "string"
+        },
+        "password": {
+          "maxLength": 256,
+          "minLength": 10,
+          "type": "string"
+        }
+      },
+      "required": [
+        "email",
+        "password"
+      ],
+      "title": "Credentials",
+      "type": "object"
+    },
     "EventType": {
       "enum": [
         "job.created",
@@ -344,6 +549,16 @@
         "job.cancelled"
       ],
       "title": "EventType",
+      "type": "string"
+    },
+    "FrameFlag": {
+      "enum": [
+        "blurry",
+        "dark",
+        "overexposed",
+        "duplicate"
+      ],
+      "title": "FrameFlag",
       "type": "string"
     },
     "FrameRange": {
@@ -368,6 +583,67 @@
         "count"
       ],
       "title": "FrameRange",
+      "type": "object"
+    },
+    "FrameSeries": {
+      "description": "Per-frame metrics, column-oriented (one entry per decoded frame, in display order).\n\n- `t`: presentation time in seconds from the stream's first frame.\n- `sharpness`: variance of the Laplacian at analysis resolution (higher = sharper).\n- `brightness`: mean luma, 0-1.\n- `change`: mean absolute luma difference to the previous frame, 0-1.\n- `motion_px`: estimated global image shift to the previous frame, in analysis pixels.\n- `flags`: per-frame quality flags.",
+      "properties": {
+        "brightness": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "change": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "flags": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/FrameFlag"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "index": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "motion_px": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "sharpness": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "t": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "index",
+        "t",
+        "sharpness",
+        "brightness",
+        "change",
+        "motion_px",
+        "flags"
+      ],
+      "title": "FrameSeries",
       "type": "object"
     },
     "FrameType": {
@@ -685,6 +961,224 @@
       "title": "JobStatus",
       "type": "string"
     },
+    "Keyframe": {
+      "properties": {
+        "image": {
+          "type": "integer"
+        },
+        "index": {
+          "type": "integer"
+        },
+        "quality": {
+          "type": "number"
+        },
+        "reason": {
+          "$ref": "#/$defs/KeyframeReason"
+        },
+        "t": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "index",
+        "t",
+        "reason",
+        "quality",
+        "image"
+      ],
+      "title": "Keyframe",
+      "type": "object"
+    },
+    "KeyframeReason": {
+      "enum": [
+        "start",
+        "novelty",
+        "max_gap",
+        "end"
+      ],
+      "title": "KeyframeReason",
+      "type": "string"
+    },
+    "Mission": {
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "video": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Asset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "created_at",
+        "video"
+      ],
+      "title": "Mission",
+      "type": "object"
+    },
+    "MissionCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "MissionCreate",
+      "type": "object"
+    },
+    "PreflightReport": {
+      "properties": {
+        "analysis": {
+          "$ref": "#/$defs/AnalysisInfo"
+        },
+        "asset_id": {
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "keyframes": {
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          },
+          "type": "array"
+        },
+        "probe": {
+          "$ref": "#/$defs/VideoProbe"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "series": {
+          "$ref": "#/$defs/FrameSeries"
+        },
+        "settings": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "source_sha256": {
+          "type": "string"
+        },
+        "summary": {
+          "$ref": "#/$defs/PreflightSummary"
+        },
+        "telemetry_present": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/PreflightWarning"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "asset_id",
+        "source_sha256",
+        "generated_at",
+        "probe",
+        "analysis",
+        "summary",
+        "keyframes",
+        "warnings",
+        "telemetry_present",
+        "settings",
+        "series"
+      ],
+      "title": "PreflightReport",
+      "type": "object"
+    },
+    "PreflightSummary": {
+      "properties": {
+        "blurry_frames": {
+          "type": "integer"
+        },
+        "dark_frames": {
+          "type": "integer"
+        },
+        "duplicate_frames": {
+          "type": "integer"
+        },
+        "median_sharpness": {
+          "type": "number"
+        },
+        "overexposed_frames": {
+          "type": "integer"
+        },
+        "usable_frames": {
+          "type": "integer"
+        },
+        "viewpoint_change": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "usable_frames",
+        "blurry_frames",
+        "dark_frames",
+        "overexposed_frames",
+        "duplicate_frames",
+        "median_sharpness",
+        "viewpoint_change"
+      ],
+      "title": "PreflightSummary",
+      "type": "object"
+    },
+    "PreflightWarning": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/WarningSeverity"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "title": "PreflightWarning",
+      "type": "object"
+    },
     "PreviewUpdated": {
       "additionalProperties": false,
       "properties": {
@@ -752,6 +1246,41 @@
         "revision"
       ],
       "title": "PreviewUpdatedData",
+      "type": "object"
+    },
+    "ProcessingProgress": {
+      "description": "Server-side processing phase. Counts are null when the work is not countable.",
+      "properties": {
+        "completed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phase": {
+          "type": "string"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "title": "ProcessingProgress",
       "type": "object"
     },
     "Provenance": {
@@ -1154,6 +1683,126 @@
       "title": "StageStarted",
       "type": "object"
     },
+    "UserPublic": {
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ],
+      "title": "UserPublic",
+      "type": "object"
+    },
+    "VideoProbe": {
+      "description": "Facts read from the container/stream by ffprobe. `display_*` include rotation.",
+      "properties": {
+        "average_fps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bit_rate": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "codec": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "display_height": {
+          "type": "integer"
+        },
+        "display_width": {
+          "type": "integer"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "frame_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_audio": {
+          "type": "boolean"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "nominal_fps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pix_fmt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rotation_deg": {
+          "type": "integer"
+        },
+        "variable_frame_rate": {
+          "type": "boolean"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "container",
+        "codec",
+        "pix_fmt",
+        "width",
+        "height",
+        "display_width",
+        "display_height",
+        "rotation_deg",
+        "duration_s",
+        "frame_count",
+        "nominal_fps",
+        "average_fps",
+        "variable_frame_rate",
+        "bit_rate",
+        "has_audio"
+      ],
+      "title": "VideoProbe",
+      "type": "object"
+    },
     "WarningData": {
       "properties": {
         "code": {
@@ -1230,12 +1879,33 @@
       ],
       "title": "WarningRaised",
       "type": "object"
+    },
+    "WarningSeverity": {
+      "enum": [
+        "info",
+        "warning",
+        "blocking"
+      ],
+      "title": "WarningSeverity",
+      "type": "string"
     }
   },
   "description": "Bundle that pulls every public contract into one schema document.",
   "properties": {
     "artifact_manifest": {
       "$ref": "#/$defs/ArtifactManifest"
+    },
+    "asset": {
+      "$ref": "#/$defs/Asset"
+    },
+    "asset_create": {
+      "$ref": "#/$defs/AssetCreate"
+    },
+    "auth_state": {
+      "$ref": "#/$defs/AuthState"
+    },
+    "credentials": {
+      "$ref": "#/$defs/Credentials"
     },
     "event_type": {
       "$ref": "#/$defs/EventType"
@@ -1304,6 +1974,15 @@
     "job_status": {
       "$ref": "#/$defs/JobStatus"
     },
+    "mission": {
+      "$ref": "#/$defs/Mission"
+    },
+    "mission_create": {
+      "$ref": "#/$defs/MissionCreate"
+    },
+    "preflight_report": {
+      "$ref": "#/$defs/PreflightReport"
+    },
     "readiness": {
       "$ref": "#/$defs/ReadinessResponse"
     },
@@ -1318,7 +1997,14 @@
     "artifact_manifest",
     "job_status",
     "stage_name",
-    "event_type"
+    "event_type",
+    "auth_state",
+    "credentials",
+    "mission",
+    "mission_create",
+    "asset",
+    "asset_create",
+    "preflight_report"
   ],
   "title": "NazarContracts",
   "type": "object"

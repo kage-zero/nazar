@@ -1,25 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
-import { fileURLToPath } from 'node:url';
-
-const SAMPLE_VIDEO = fileURLToPath(
-  new URL('../../../docs/sample/video/sample1.mp4', import.meta.url),
-);
-
-function collectConsoleErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  page.on('pageerror', (err) => errors.push(err.message));
-  return errors;
-}
+import { expect, test } from '@playwright/test';
+import { collectConsoleErrors } from './helpers';
 
 test('main screen renders with live API status and no console errors', async ({ page }) => {
   const errors = collectConsoleErrors(page);
   await page.goto('/');
 
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/one pass/i);
-  await expect(page.getByRole('heading', { name: 'No missions yet' })).toBeVisible();
+  await expect(page.locator('#missions')).toBeVisible();
 
   // Real API: secrets are forced blank for E2E, so the API is up but honestly not ready.
   const status = page.getByTestId('api-status');
@@ -30,6 +17,8 @@ test('main screen renders with live API status and no console errors', async ({ 
   await expect(panel).toContainText('database');
   await expect(panel).toContainText('config:NAZAR_SECRET_KEY');
   await expect(panel).toContainText('Not configured · required');
+  // The operator account was created by the setup project, so this check now passes.
+  await expect(panel.getByRole('listitem').filter({ hasText: 'accounts' })).toContainText('OK');
 
   await expect(page.getByTestId('viewer-canvas').locator('canvas')).toBeVisible();
   await expect(page.getByTestId('viewer-empty')).toHaveText('No geometry yet.');
@@ -45,27 +34,6 @@ test('API indicator reports offline when the health endpoint is unreachable', as
   await expect(status).toHaveAttribute('data-state', 'offline');
   await expect(status).toContainText('API offline');
   await expect(page.getByTestId('readiness-panel')).toContainText('did not respond');
-});
-
-test('video picker accepts the sample video and rejects non-video files', async ({ page }) => {
-  await page.goto('/');
-  const input = page.getByTestId('video-input');
-
-  await input.setInputFiles({
-    name: 'notes.txt',
-    mimeType: 'text/plain',
-    buffer: Buffer.from('x'),
-  });
-  await expect(page.getByRole('alert')).toContainText('is not a video');
-
-  await input.setInputFiles(SAMPLE_VIDEO);
-  await expect(page.getByRole('alert')).toHaveCount(0);
-  const summary = page.getByTestId('video-summary');
-  await expect(summary).toContainText('sample1.mp4');
-  await expect(summary).toContainText('2.0 MB');
-
-  // Upload is not implemented yet, so the action must be disabled, not inert.
-  await expect(page.getByRole('button', { name: 'Upload & validate' })).toBeDisabled();
 });
 
 test('viewer controls toggle layers and expose pressed state', async ({ page }) => {

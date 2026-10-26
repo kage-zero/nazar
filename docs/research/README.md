@@ -6,15 +6,32 @@ Each item is marked **Verified** (we observed or ran it, with a date) or **Hypot
 
 Both samples decode fully (`ffmpeg -v error -f null -`) with no errors.
 
-| File                            | Size        | Codec         | Resolution         | FPS                                            | Frames | Duration | Audio |
-| ------------------------------- | ----------- | ------------- | ------------------ | ---------------------------------------------- | ------ | -------- | ----- |
-| `docs/sample/video/sample1.mp4` | 2,093,802 B | H.264 yuv420p | 640×360            | 25 (constant)                                  | 567    | 22.73 s  | AAC   |
-| `docs/sample/video/sample2.mp4` | 1,130,263 B | H.264 yuv420p | 288×360 (portrait) | nominal 30, avg ≈29.97 (15495/517), likely VFR | 1033   | 34.50 s  | AAC   |
+| File                            | Size        | Codec         | Resolution         | FPS                                 | Frames | Duration | Audio |
+| ------------------------------- | ----------- | ------------- | ------------------ | ----------------------------------- | ------ | -------- | ----- |
+| `docs/sample/video/sample1.mp4` | 2,093,802 B | H.264 yuv420p | 640×360            | 25 (constant)                       | 567    | 22.73 s  | AAC   |
+| `docs/sample/video/sample2.mp4` | 1,130,263 B | H.264 yuv420p | 288×360 (portrait) | 30 (constant; container avg ≈29.97) | 1033   | 34.50 s  | AAC   |
 
 Implications:
 
 - Both clips are low resolution, so the model input size and keyframe density matter more than VRAM.
-- `sample2` is portrait and probably variable frame rate, so we must use per-frame timestamps, not index/fps.
+- `sample2` is portrait. Its container reports an average of 15495/517 ≈ 29.97 fps, which first looked like variable frame rate. **Corrected 2026-10-26:** all 1032 packet intervals are exactly 1/30 s, so it is constant 30 fps; the average differs only because the container duration is slightly longer than the frames. Preflight therefore decides VFR from the real per-frame timestamps, never from the container average, and always uses per-frame timestamps rather than index/fps.
+
+## Preflight on the samples (Verified 2026-10-26, `packages/media`, laptop CPU)
+
+|                                          | sample1                            | sample2                                       |
+| ---------------------------------------- | ---------------------------------- | --------------------------------------------- |
+| Content (from contact sheets)            | slow aerial orbit of the Colosseum | aerial orbit of a pyramid, portrait           |
+| Frames decoded / decode errors           | 567 / 0                            | 1033 / 0                                      |
+| Wall time (CPU only)                     | ≈1.6 s alone, ≈4 s under E2E load  | ≈3.0–3.3 s (28 blurry frames)                 |
+| Viewpoint change (chained decorrelation) | 0.51                               | 4.71                                          |
+| Keyframes                                | 22 (mostly time-gap: slow orbit)   | 78 (mostly new-view)                          |
+| Repeated frames                          | 4                                  | 289 (≈28%), real `repeated_frames` warning    |
+| Warnings                                 | low resolution, no telemetry       | low resolution, repeated frames, no telemetry |
+
+Method notes:
+
+- Translation-only motion estimates (phase correlation) under-report orbit parallax. Viewpoint novelty is therefore measured as 1 − NCC between 48-px thumbnails. Frame-to-frame noise measured 0.0001–0.0025; the 0.035 novelty threshold sits well above it.
+- These thresholds are calibrated on two short clips only. Treat them as **Hypothesis** for other footage until more videos are tested.
 - No telemetry or calibration files were supplied, so the video-only path is the primary test. Intrinsics are unknown and must be estimated and marked uncertain.
 
 ## Development hardware (Verified 2026-10-26)

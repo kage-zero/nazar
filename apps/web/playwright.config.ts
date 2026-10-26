@@ -1,8 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
+import { OPERATOR_STATE } from './e2e/operator';
 
 const REPO_ROOT = '../..';
 const API_PORT = 8765;
 const WEB_PORT = 5174;
+// One storage dir per run so first-run setup always starts from an empty database.
+// Set here, in the main process, so every worker inherits the same value.
+process.env.NAZAR_E2E_RUN ??= String(Date.now());
 
 /**
  * Fast deterministic E2E profile: real FastAPI + real Vite dev server, no GPU, no weights.
@@ -12,6 +16,9 @@ const WEB_PORT = 5174;
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Each worker runs Chromium with software WebGL next to the API's CPU-bound video
+  // validation; more than a few workers starves the machine and causes false timeouts.
+  workers: process.env.CI ? 2 : 3,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
@@ -24,11 +31,22 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   projects: [
+    // Creates the operator through the real first-run UI and saves the session cookie.
+    { name: 'setup', testMatch: /operator\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
     {
       name: 'desktop',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      dependencies: ['setup'],
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+        storageState: OPERATOR_STATE,
+      },
     },
-    { name: 'mobile', use: { ...devices['Pixel 7'] } },
+    {
+      name: 'mobile',
+      dependencies: ['setup'],
+      use: { ...devices['Pixel 7'], storageState: OPERATOR_STATE },
+    },
   ],
   webServer: [
     {
@@ -40,7 +58,7 @@ export default defineConfig({
       env: {
         NAZAR_ENV: 'test',
         NAZAR_API_PORT: String(API_PORT),
-        NAZAR_STORAGE_DIR: 'var/e2e-storage',
+        NAZAR_STORAGE_DIR: `var/e2e-storage/${process.env.NAZAR_E2E_RUN}`,
         NAZAR_WEB_ORIGINS: `http://127.0.0.1:${WEB_PORT}`,
         NAZAR_DATABASE_URL: '',
         NAZAR_SECRET_KEY: '',

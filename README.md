@@ -2,15 +2,16 @@
 
 Single-pass drone video → progressively revealed 3D reconstruction.
 
-> **Status: Stage 1 scaffold (Gate 1).** The monorepo, API health/readiness, typed contracts, design-system shell, 3D viewport scaffold and test foundation exist. **No reconstruction stage runs yet.** See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+> **Status: Milestone 2 (ingestion) in progress.** Operator account, missions, resumable video upload, server-side validation, preflight quality report and keyframe selection work end to end. **No reconstruction stage runs yet.** See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
 
 ## Layout
 
 ```text
 apps/web            React 19 + TypeScript + Vite + React Three Fiber + Tailwind v4 + Zustand
-apps/api            FastAPI service (Python 3.12, uv) — health/readiness today
+apps/api            FastAPI service (Python 3.12, uv) — auth, missions, uploads, preflight
 apps/worker         Reconstruction worker CLI (doctor, stage plan; job loop in Milestone 4)
 packages/contracts  Pydantic contracts → JSON Schema → generated TypeScript
+packages/media      FFmpeg probe/decode, frame quality metrics, keyframe selection (CPU)
 infra/              Optional docker-compose (PostGIS, Redis, MinIO)
 docs/               Project brief, design guide, VDI guide, samples + our ADRs/notes
 ```
@@ -20,8 +21,9 @@ docs/               Project brief, design guide, VDI guide, samples + our ADRs/n
 ```bash
 pnpm install
 uv sync --all-packages
-cp .env.example .env        # then fill the blank secrets locally — see docs/ENVIRONMENT_SETUP.md
+pnpm env:init               # creates .env and generates local machine secrets (prints names only)
 pnpm dev                    # web http://127.0.0.1:5173  ·  API http://127.0.0.1:8000/docs
+                            # first visit: create the operator account in the web app
 ```
 
 ## Checks

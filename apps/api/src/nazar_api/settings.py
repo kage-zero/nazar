@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=2048, gt=0)
     max_video_seconds: int = Field(default=900, gt=0)
     gpu_max_concurrent_jobs: int = Field(default=1, ge=1)
+    upload_chunk_max_mb: int = Field(default=16, gt=0)
+    session_days: int = Field(default=7, gt=0)
 
     secret_key: SecretStr | None = None
     worker_token: SecretStr | None = None
@@ -64,6 +66,10 @@ class Settings(BaseSettings):
     def storage_path(self) -> Path:
         path = self.storage_dir
         return path if path.is_absolute() else REPO_ROOT / path
+
+    @property
+    def secure_cookies(self) -> bool:
+        return self.env == "production"
 
     @property
     def sqlalchemy_url(self) -> str:

@@ -13,12 +13,13 @@
 
 ## Component boundaries
 
-| Component            | Owns                                                                          | Never does                                                |
-| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `apps/web`           | UI state, rendering, client pre-checks                                        | Trust its own checks; hold large geometry in global state |
-| `apps/api`           | Auth, missions, uploads, job state machine, event log, artifact metadata/URLs | Run GPU inference in a request handler                    |
-| `apps/worker`        | Leasing jobs, stage orchestration, checksums, atomic writes                   | Touch the DB directly; import torch in the orchestrator   |
-| `packages/contracts` | Event/artifact/health/job-status schemas, transition table                    | Contain business logic beyond the state machine           |
+| Component            | Owns                                                                            | Never does                                                |
+| -------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `apps/web`           | UI state, rendering, client pre-checks                                          | Trust its own checks; hold large geometry in global state |
+| `apps/api`           | Auth, missions, uploads, job state machine, event log, artifact metadata/URLs   | Run GPU inference in a request handler                    |
+| `apps/worker`        | Leasing jobs, stage orchestration, checksums, atomic writes                     | Touch the DB directly; import torch in the orchestrator   |
+| `packages/media`     | Probing/decoding video via FFmpeg argv calls, frame metrics, keyframe selection | Know about HTTP, the DB or users                          |
+| `packages/contracts` | Event/artifact/health/job-status schemas, transition table                      | Contain business logic beyond the state machine           |
 
 ## Contracts (`packages/contracts`)
 
@@ -55,6 +56,14 @@ A manifest records:
 - `provenance`, including the `test_pipeline` flag
 
 It contains no paths or storage credentials.
+
+## Ingestion (Milestone 2)
+
+1. **Auth.** One operator account, from first-run setup (loopback only) or env bootstrap. Passwords are hashed with scrypt. Sessions are server-side, keyed by the SHA-256 of an HttpOnly cookie. Every state-changing `/api` request must carry `X-Nazar-Request: 1`; this is the CSRF guard, and CORS allows that header only from configured origins. Failed logins are throttled per client and email.
+2. **Missions** are owned by the operator. Another owner's ids return 404.
+3. **Upload.** `POST /api/missions/{id}/assets` registers `{kind, filename, byte_size}`, checking extension and size. Bytes go to `PUT /api/assets/{id}/content?offset=N` in chunks. A wrong offset returns 409 with the server's offset, so retries and resumes are safe. Files are stored under server-generated ids only.
+4. **Validation.** On the last chunk the API hashes the file (SHA-256), marks it `validating` and queues it on a single background thread: ffprobe → full decode at 320 px → per-frame sharpness, exposure, change, motion and viewpoint signature → keyframe selection → full-resolution and thumbnail JPEGs → `preflight.json` (atomic writes). Progress is written to the asset row, which the web app polls. Cancel is `DELETE`: the job stops at its next checkpoint and removes its files. Assets left `validating` by a restart are re-queued on startup. Undecodable files end `rejected` with a user-safe reason.
+5. This in-process executor is CPU-only. GPU stages will run in the pull-based worker (ADR-0003).
 
 ## Coordinate-frame rules (summary; details arrive with Milestone 3)
 

@@ -29,6 +29,17 @@ export type ArtifactKind =
   | 'export';
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "AssetKind".
+ */
+export type AssetKind = 'video' | 'telemetry';
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "AssetStatus".
+ */
+export type AssetStatus =
+  'uploading' | 'validating' | 'ready' | 'rejected' | 'failed' | 'cancelled';
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "EventType".
  */
 export type EventType =
@@ -96,6 +107,21 @@ export type JobStatus =
   | 'cancelled';
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "KeyframeReason".
+ */
+export type KeyframeReason = 'start' | 'novelty' | 'max_gap' | 'end';
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "FrameFlag".
+ */
+export type FrameFlag = 'blurry' | 'dark' | 'overexposed' | 'duplicate';
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WarningSeverity".
+ */
+export type WarningSeverity = 'info' | 'warning' | 'blocking';
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "CheckStatus".
  */
 export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' | 'not_implemented';
@@ -105,10 +131,17 @@ export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' |
  */
 export interface NazarContracts {
   artifact_manifest: ArtifactManifest;
+  asset: Asset;
+  asset_create: AssetCreate;
+  auth_state: AuthState;
+  credentials: Credentials;
   event_type: EventType;
   health: HealthResponse;
   job_event: JobEvent;
   job_status: JobStatus;
+  mission: Mission;
+  mission_create: MissionCreate;
+  preflight_report: PreflightReport;
   readiness: ReadinessResponse;
   stage_name: StageName;
 }
@@ -220,6 +253,70 @@ export interface FrameRange {
   count: number;
   first_index: number;
   last_index: number;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "Asset".
+ */
+export interface Asset {
+  byte_size: number;
+  created_at: string;
+  error: string | null;
+  filename: string;
+  id: string;
+  kind: AssetKind;
+  mission_id: string;
+  progress: ProcessingProgress | null;
+  received_bytes: number;
+  sha256: string | null;
+  status: AssetStatus;
+  updated_at: string;
+}
+/**
+ * Server-side processing phase. Counts are null when the work is not countable.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "ProcessingProgress".
+ */
+export interface ProcessingProgress {
+  completed?: number | null;
+  phase: string;
+  total?: number | null;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "AssetCreate".
+ */
+export interface AssetCreate {
+  byte_size: number;
+  filename: string;
+  kind: AssetKind;
+}
+/**
+ * `setup_required` is true only while no operator account exists.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "AuthState".
+ */
+export interface AuthState {
+  setup_required: boolean;
+  user: UserPublic | null;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "UserPublic".
+ */
+export interface UserPublic {
+  email: string;
+  id: string;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "Credentials".
+ */
+export interface Credentials {
+  email: string;
+  password: string;
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -472,6 +569,133 @@ export interface JobCancelled {
   status: JobStatus;
   ts: string;
   type: 'job.cancelled';
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "Mission".
+ */
+export interface Mission {
+  created_at: string;
+  id: string;
+  name: string;
+  video: Asset | null;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "MissionCreate".
+ */
+export interface MissionCreate {
+  name: string;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "PreflightReport".
+ */
+export interface PreflightReport {
+  analysis: AnalysisInfo;
+  asset_id: string;
+  generated_at: string;
+  keyframes: Keyframe[];
+  probe: VideoProbe;
+  schema_version?: 1;
+  series: FrameSeries;
+  settings: {
+    [k: string]: number | string;
+  };
+  source_sha256: string;
+  summary: PreflightSummary;
+  telemetry_present: boolean;
+  warnings: PreflightWarning[];
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "AnalysisInfo".
+ */
+export interface AnalysisInfo {
+  decode_errors: number;
+  frames_decoded: number;
+  height: number;
+  processing_s: number;
+  timestamps: 'stream' | 'estimated';
+  width: number;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "Keyframe".
+ */
+export interface Keyframe {
+  image: number;
+  index: number;
+  quality: number;
+  reason: KeyframeReason;
+  t: number;
+}
+/**
+ * Facts read from the container/stream by ffprobe. `display_*` include rotation.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "VideoProbe".
+ */
+export interface VideoProbe {
+  average_fps: number | null;
+  bit_rate: number | null;
+  codec: string;
+  container: string;
+  display_height: number;
+  display_width: number;
+  duration_s: number;
+  frame_count: number | null;
+  has_audio: boolean;
+  height: number;
+  nominal_fps: number | null;
+  pix_fmt: string | null;
+  rotation_deg: number;
+  variable_frame_rate: boolean;
+  width: number;
+}
+/**
+ * Per-frame metrics, column-oriented (one entry per decoded frame, in display order).
+ *
+ * - `t`: presentation time in seconds from the stream's first frame.
+ * - `sharpness`: variance of the Laplacian at analysis resolution (higher = sharper).
+ * - `brightness`: mean luma, 0-1.
+ * - `change`: mean absolute luma difference to the previous frame, 0-1.
+ * - `motion_px`: estimated global image shift to the previous frame, in analysis pixels.
+ * - `flags`: per-frame quality flags.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "FrameSeries".
+ */
+export interface FrameSeries {
+  brightness: number[];
+  change: number[];
+  flags: FrameFlag[][];
+  index: number[];
+  motion_px: number[];
+  sharpness: number[];
+  t: number[];
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "PreflightSummary".
+ */
+export interface PreflightSummary {
+  blurry_frames: number;
+  dark_frames: number;
+  duplicate_frames: number;
+  median_sharpness: number;
+  overexposed_frames: number;
+  usable_frames: number;
+  viewpoint_change: number;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "PreflightWarning".
+ */
+export interface PreflightWarning {
+  code: string;
+  message: string;
+  severity: WarningSeverity;
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema

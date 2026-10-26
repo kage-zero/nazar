@@ -1,0 +1,11 @@
+{
+  "name": "@nazar/media",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turbo task wrappers for the Python media library (managed by uv)",
+  "scripts": {
+    "lint": "uv run ruff check python tests && uv run ruff format --check python tests",
+    "typecheck": "uv run mypy python tests",
+    "test": "uv run pytest tests"
+  }
+}

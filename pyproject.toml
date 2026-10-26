@@ -17,10 +17,11 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["apps/api", "apps/worker", "packages/contracts"]
+members = ["apps/api", "apps/worker", "packages/contracts", "packages/media"]
 
 [tool.uv.sources]
 nazar-contracts = { workspace = true }
+nazar-media = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -31,7 +32,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "ASYNC"]
 ignore = ["S101"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["nazar_api", "nazar_contracts", "nazar_worker"]
+known-first-party = ["nazar_api", "nazar_contracts", "nazar_media", "nazar_worker"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S105", "S106"]
