@@ -101,8 +101,10 @@ test('a running job survives a reload, can be cancelled and retried', async ({ p
   await expect(status).toHaveAttribute('data-status', 'completed', { timeout: 90_000 });
 });
 
-// REAL DATA: the supplied drone clip through the real preflight and the CPU geometry baseline
-// (classical structure-from-motion). Nothing here is synthetic.
+// REAL DATA: the supplied drone clip through the real preflight and real geometry: the CPU
+// baseline (classical structure-from-motion) by default, Fast3R on the GPU when the run sets
+// NAZAR_E2E_FAST3R=1 (see playwright.config.ts). Nothing here is synthetic.
+const FAST3R = process.env.NAZAR_E2E_FAST3R === '1';
 test('reconstruct builds real geometry from the sample video, progressively', async ({
   page,
 }, testInfo) => {
@@ -114,7 +116,6 @@ test('reconstruct builds real geometry from the sample video, progressively', as
 
   const panel = page.getByTestId('job-panel');
   await panel.getByRole('button', { name: 'Reconstruct' }).click();
-  await expect(panel.getByText('CPU baseline', { exact: true })).toBeVisible();
 
   // A real preview cloud arrives while the job is still running.
   await page.waitForFunction(
@@ -130,14 +131,20 @@ test('reconstruct builds real geometry from the sample video, progressively', as
     undefined,
     { timeout: 200_000 },
   );
-  await expect(page.getByText('CPU baseline · sparse SfM')).toBeVisible();
+  // Labels come from the artifacts' provenance: they name the method that actually ran.
+  await expect(
+    panel.getByText(FAST3R ? 'GPU · Fast3R' : 'CPU baseline', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(FAST3R ? 'Fast3R · learned dense geometry' : 'CPU baseline · sparse SfM'),
+  ).toBeVisible();
 
   const status = page.getByTestId('job-status');
   await expect(status).toHaveAttribute('data-status', 'completed', { timeout: 200_000 });
   const viewer = page.getByTestId('viewer-stage');
   await expect(viewer).toHaveAttribute('data-cloud-kind', 'point_cloud');
   const finalPoints = Number(await viewer.getAttribute('data-cloud-points'));
-  expect(finalPoints).toBeGreaterThan(3000);
+  expect(finalPoints).toBeGreaterThan(FAST3R ? 50_000 : 3000);
 
   const pipeline = page.getByTestId('pipeline');
   await expect(pipeline.locator('[data-stage="geometry"]')).toHaveAttribute(
@@ -157,13 +164,24 @@ test('reconstruct builds real geometry from the sample video, progressively', as
     .getByRole('link', { name: 'Download' })
     .getAttribute('href');
   const report = (await (await page.request.get(href ?? '')).json()) as {
-    geometry: { registered_keyframes: number; points: number; mean_reproj_px: number };
+    geometry_method: string;
+    geometry: {
+      registered_keyframes?: number;
+      placed_keyframes?: number;
+      points: number;
+      mean_reproj_px?: number;
+    };
     coordinate_frame: { scale_status: string };
   };
-  expect(report.geometry.registered_keyframes).toBeGreaterThanOrEqual(18);
-  // The report describes the cloud the viewer shows (the filtered one), not the raw SfM output.
+  expect(report.geometry_method).toBe(FAST3R ? 'fast3r' : 'sfm');
+  if (FAST3R) {
+    expect(report.geometry.placed_keyframes).toBeGreaterThanOrEqual(18);
+  } else {
+    expect(report.geometry.registered_keyframes).toBeGreaterThanOrEqual(18);
+    expect(report.geometry.mean_reproj_px).toBeLessThan(1.5);
+  }
+  // The report describes the cloud the viewer shows (the filtered one), not the raw output.
   expect(report.geometry.points).toBe(finalPoints);
-  expect(report.geometry.mean_reproj_px).toBeLessThan(1.5);
   expect(report.coordinate_frame.scale_status).toBe('unknown');
 
   await page.screenshot({ path: testInfo.outputPath('reconstruct-complete.png'), fullPage: true });

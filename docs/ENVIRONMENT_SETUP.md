@@ -9,7 +9,7 @@ pnpm install                 # JS deps (workspace)
 uv sync --all-packages       # Python deps (api, worker, contracts) into .venv
 pnpm env:init                # creates .env from .env.example and generates the two machine secrets
 pnpm dev                     # web on :5173 (proxies /api) + API on :8000
-pnpm worker                  # second terminal: polls the API for jobs (test pipeline only for now)
+pnpm worker                  # second terminal: runs jobs (test pipeline + standard pipeline)
 # then open http://127.0.0.1:5173 and create the operator account (first run only)
 ```
 
@@ -64,6 +64,49 @@ Headless/production alternative: set `NAZAR_BOOTSTRAP_ADMIN_EMAIL` and `NAZAR_BO
 | `NAZAR_API_BASE_URL` | Where the worker finds the API. |
 | `NAZAR_PIPELINE_MODE` | `test` = deterministic fixture pipeline; `real` = research models. |
 
+## Fast3R GPU runtime (optional; standard pipeline geometry)
+
+Without it, Reconstruct uses the CPU baseline (classical structure-from-motion) and says so in the job. With it, the worker runs Fast3R ViT-L/512 for dense learned geometry, and still falls back to the CPU baseline, visibly, if Fast3R fails on a job.
+
+Licence: Fast3R code and weights are under the FAIR Noncommercial Research License. They are approved for this academic, non-commercial project only. That approval does not extend to commercial use or to other models.
+
+Fast3R runs in its **own** Python 3.11 environment under `var/gpu/` (git-ignored). The worker never imports torch: it starts `apps/worker/gpu/fast3r_runner.py` with that interpreter and reads JSON events from it.
+
+```bash
+pnpm gpu:check   # read-only: verifies source commit, packages, CUDA and weights
+pnpm gpu:setup   # installs whatever is missing (~2.6 GB checkpoint + ~3 GB of wheels)
+```
+
+`gpu:setup` installs three things, all pinned:
+
+| Piece | Pin |
+|---|---|
+| Source | `facebookresearch/fast3r` @ `33104d4b5b8df43795ecded236194958bbdac572` → `var/gpu/fast3r-src` |
+| Packages | `apps/worker/gpu/requirements-fast3r.txt` (exact freeze of the verified environment: torch 2.7.1+cu126, numpy 1.26.4, ...) → `var/gpu/fast3r-env` |
+| Weights | `jedyang97/Fast3R_ViT_Large_512` @ `a2c770b768ceb3a53c36c4f7a3619db0413dc3a1`, `model.safetensors` SHA-256 `1357d42e…0427` → `var/gpu/weights/Fast3R_ViT_Large_512` |
+
+It needs no Hugging Face token.
+
+Then set, in `.env` (paths, not secrets; relative paths are relative to the repo root):
+
+| Setting | Meaning |
+|---|---|
+| `NAZAR_FAST3R_PYTHON` | GPU interpreter, e.g. `var/gpu/fast3r-env/Scripts/python.exe` (Windows) or `var/gpu/fast3r-env/bin/python` (Linux). |
+| `NAZAR_FAST3R_WEIGHTS` | Checkpoint directory containing `model.safetensors` and `config.json`. |
+| `NAZAR_FAST3R_MAX_VIEWS` | Views per forward pass. `0` (default) sizes passes from free VRAM: about 215 MiB per view plus 1.5 GiB margin. Out-of-memory halves it automatically. |
+
+`pnpm worker` logs `standard geometry: Fast3R on the GPU …` or `CPU baseline. <reason>` at start.
+
+Measured on the RTX 4050 Laptop (6 GB) with the 22 keyframes of `docs/sample/video/sample1.mp4`:
+
+- Loading the model takes about 2 s.
+- Inference takes 4–5 s, in 3–4 aligned chunks of 9–10 views.
+- Peak VRAM is about 3.1 GiB.
+- The whole geometry stage takes about 14 s, most of it Python and torch start-up. The CPU baseline's geometry stage takes about 18 s.
+- The first preview reaches the viewer after about 10 s.
+
+**Windows memory note.** On Windows (WDDM), GPU allocations are also charged to the system *commit* limit (RAM + page file), so the runner needs about 2.3 GiB plus its peak VRAM of free commit (≈ 5–8 GiB). When commit runs out, CUDA fails with `unknown error` or `Memory allocation failure` and the job falls back to the CPU baseline with that reason. If that happens, close memory-heavy apps or let Windows grow the page file. Linux hosts (the college VDI) do not charge commit this way.
+
 ## College GPU (SyncVDI) workflow, as far as it is known
 
 1. You sign in at the SyncVDI portal and request a session. Platform **Linux** is preferred for CUDA research code; pick the GPU, RAM and duration there.
@@ -72,7 +115,7 @@ Headless/production alternative: set `NAZAR_BOOTSTRAP_ADMIN_EMAIL` and `NAZAR_BO
 4. Still to be confirmed, with read-only checks or college support:
    - whether outbound HTTPS from the VDI can reach the API (ADR-0003);
    - persistent storage location and quota;
-   - whether `pip`/`uv` downloads and Hugging Face downloads are allowed;
+   - whether `pip`/`uv` downloads and Hugging Face downloads are allowed (needed once, for `pnpm gpu:setup`; it can also be pointed at weights copied in by hand via `NAZAR_FAST3R_WEIGHTS`);
    - session maximum duration.
 
 Never leave the only copy of results in the VDI session. Do not run heavy GPU jobs speculatively on shared hardware.

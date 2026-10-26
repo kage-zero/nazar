@@ -10,6 +10,7 @@ import {
   type CompletionFeedback,
 } from '../lib/completion';
 import { isTerminal } from '../lib/jobState';
+import { jobMethod, METHOD_TAG } from '../lib/provenance';
 import type { StreamState } from '../lib/jobStream';
 import { STAGE_COPY } from './PipelinePlan';
 import { Button, Card, Tag } from './ui';
@@ -147,6 +148,7 @@ export function JobPanel({
   const finished = job ? isTerminal(job) : true;
   const showStart = loaded && canStart && finished;
   const outputs = job?.status === 'completed' ? job.artifacts : [];
+  const method = job ? jobMethod(job.artifacts) : null;
 
   return (
     <Card aria-labelledby="job-heading" data-testid="job-panel">
@@ -156,7 +158,9 @@ export function JobPanel({
         </h2>
         <div className="flex gap-2">
           {job?.pipeline === 'test' && <Tag tone="carbon">Test pipeline</Tag>}
-          {job?.pipeline === 'standard' && <Tag tone="mint">CPU baseline</Tag>}
+          {job?.pipeline === 'standard' && method && method !== 'test' && (
+            <Tag tone="mint">{METHOD_TAG[method]}</Tag>
+          )}
           {job && STREAM_TEXT[stream] && <Tag tone="mist">{STREAM_TEXT[stream]}</Tag>}
         </div>
       </div>
@@ -236,9 +240,9 @@ export function JobPanel({
       </div>
       {showStart && (
         <p className="mt-3 text-sm text-slate">
-          Reconstruct runs the CPU baseline (classical structure-from-motion) on your keyframes:
-          real but sparse geometry, in a local frame with unknown scale. The GPU models (Fast3R and
-          others) need the college GPU worker.
+          Reconstruct uses Fast3R (learned dense geometry) when the worker has a GPU set up for it,
+          and otherwise the CPU baseline (classical structure-from-motion, sparse). Either way the
+          result is in a local frame with unknown scale, and the job says which method ran.
         </p>
       )}
       {!canStart && !job && loaded && (

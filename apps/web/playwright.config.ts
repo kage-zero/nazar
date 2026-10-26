@@ -3,8 +3,10 @@ import { randomBytes } from 'node:crypto';
 import { OPERATOR_STATE } from './e2e/operator';
 
 const REPO_ROOT = '../..';
-const API_PORT = 8765;
-const WEB_PORT = 5174;
+// Uncommon ports, overridable, so the suite never talks to something else already listening
+// (a health check answered by another local app would start the tests against the wrong server).
+const API_PORT = Number(process.env.NAZAR_E2E_API_PORT ?? 18765);
+const WEB_PORT = Number(process.env.NAZAR_E2E_WEB_PORT ?? 15174);
 // One storage dir per run so first-run setup always starts from an empty database.
 // Set here, in the main process, so every worker inherits the same value.
 process.env.NAZAR_E2E_RUN ??= String(Date.now());
@@ -84,7 +86,12 @@ export default defineConfig({
       wait: { stderr: new RegExp(`polling for ${mode} jobs`) },
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { NAZAR_WORKER_TOKEN: WORKER_TOKEN },
+      // Fast3R only when asked for (NAZAR_E2E_FAST3R=1 plus a configured GPU runtime), so a
+      // developer's shell settings cannot silently change what the real-data spec checks.
+      env: {
+        NAZAR_WORKER_TOKEN: WORKER_TOKEN,
+        ...(process.env.NAZAR_E2E_FAST3R === '1' ? {} : { NAZAR_FAST3R_PYTHON: '' }),
+      },
     })),
     {
       command: `pnpm exec vite --port ${WEB_PORT} --strictPort --host 127.0.0.1`,

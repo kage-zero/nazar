@@ -4,7 +4,7 @@ Every pipeline stage is implemented by an adapter that reads declared inputs fro
 workspace and writes declared, checksummed outputs atomically. Adapters never touch the
 database or the browser; the worker loop turns their results into contract events.
 
-`baseline.build_baseline_pipeline` builds the standard pipeline (CPU geometry baseline) and
+`standard.build_standard_pipeline` builds the standard pipeline (Fast3R or CPU SfM) and
 `test_pipeline.build_test_pipeline` the deterministic test pipeline used by CI and demos.
 `STAGE_PLAN` records the intended component and the milestone that delivers each one,
 so the UI and docs can state status honestly.

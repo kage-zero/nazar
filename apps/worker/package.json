@@ -5,7 +5,7 @@
   "description": "Turbo task wrappers for the Python reconstruction worker (managed by uv)",
   "scripts": {
     "doctor": "uv run --package nazar-worker nazar-worker doctor",
-    "lint": "uv run ruff check src tests && uv run ruff format --check src tests",
+    "lint": "uv run ruff check src tests gpu && uv run ruff format --check src tests gpu",
     "typecheck": "uv run mypy src tests",
     "test": "uv run pytest tests"
   }

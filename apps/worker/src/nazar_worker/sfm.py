@@ -481,6 +481,28 @@ def _up_alignment(points: F64, centers: F64, seed: int = 0) -> tuple[F64, F64, f
     return rot, np.array([0.0, best_d, 0.0]), share
 
 
+def to_nazar_frame(
+    pts_cv: F64, centers_cv: F64, max_plane_samples: int = 20_000
+) -> tuple[F64, F64, float]:
+    """OpenCV-camera-frame points and camera centres → NAZAR's local frame: +Y up (dominant
+    plane levelled, cameras above it), centred on the median point, scaled so the median camera
+    distance is 10 units. Returns (points, centres, plane inlier share). Shared by every
+    geometry method so their outputs are directly comparable."""
+    pts = pts_cv @ CV_TO_NAZAR.T
+    centers = centers_cv @ CV_TO_NAZAR.T
+    if len(pts):
+        mid = np.median(pts, axis=0)
+        pts, centers = pts - mid, centers - mid
+        dist = float(np.median(np.linalg.norm(centers, axis=1))) or 1.0
+        pts, centers = pts * (10 / dist), centers * (10 / dist)
+    sample = pts
+    if len(pts) > max_plane_samples:
+        pick = np.random.default_rng(0).choice(len(pts), max_plane_samples, replace=False)
+        sample = pts[pick]
+    rot, shift, plane_share = _up_alignment(sample, centers)
+    return pts @ rot.T + shift, centers @ rot.T + shift, plane_share
+
+
 def reconstruct(
     images: Sequence[U8],
     settings: SfmSettings | None = None,
@@ -619,17 +641,7 @@ def _snapshot(recon: _Recon, anchor: int, total: int, *, final: bool) -> Snapsho
     registered = sorted(recon.rvecs)
     centers_cv = np.array([recon.center(i) for i in registered]).reshape(-1, 3)
 
-    # Normalise: centre on the median point, scale so the median camera distance is 10 units.
-    pts = pts_cv @ CV_TO_NAZAR.T
-    centers = centers_cv @ CV_TO_NAZAR.T
-    if len(pts):
-        mid = np.median(pts, axis=0)
-        pts, centers = pts - mid, centers - mid
-        dist = float(np.median(np.linalg.norm(centers, axis=1))) or 1.0
-        pts, centers = pts * (10 / dist), centers * (10 / dist)
-    rot, shift, plane_share = _up_alignment(pts, centers)
-    pts = pts @ rot.T + shift
-    centers = centers @ rot.T + shift
+    pts, centers, plane_share = to_nazar_frame(pts_cv, centers_cv)
     return Snapshot(
         points=pts,
         colors=colors,

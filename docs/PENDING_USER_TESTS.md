@@ -41,13 +41,26 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
   - Browsers may block audio until you have clicked on the page; then no sound plays and the page says nothing about sound.
 - [ ] **B4. Vibration (phone only).** Open the app on an Android phone on the same network. This needs `NAZAR_WEB_ORIGINS` plus Vite `--host`; ask me and I'll set it up. Expected: a short vibration on completion. On desktops the browser accepts the request but has no motor.
 - [ ] **B5. Reconnect.** Start a job, turn Wi-Fi off for about 10 s, then turn it on again. Expected: the badge shows "Reconnecting…", then the job continues with no missing stages.
-- [ ] **B7. Real reconstruction.** Upload `docs/sample/video/sample1.mp4`, wait for validation, press **Reconstruct**. Expected: preview clouds appear while "Multi-view geometry" runs (about 10–35 s on a laptop), and the final cloud shows the Colosseum's oval ring from above (orbit the view). The camera path forms an arc above the ground. Tags read "CPU baseline". Try `sample2.mp4` too (78 keyframes, slower).
+- [ ] **B7. Real reconstruction.** _(Deferred by you to later.)_ Upload `docs/sample/video/sample1.mp4`, wait for validation, press **Reconstruct**. Expected: preview clouds appear while "Multi-view geometry" runs (about 10–35 s on a laptop), and the final cloud shows the Colosseum's oval ring from above (orbit the view). The camera path forms an arc above the ground. Tags read "CPU baseline" when Fast3R is not configured (see B8 for the GPU path). Try `sample2.mp4` too (78 keyframes, slower).
+- [ ] **B8. Reconstruct with Fast3R (this laptop's GPU).**
+  1. Run `pnpm gpu:check`. It should end with "Fast3R runtime OK".
+  2. Make sure `.env` has `NAZAR_FAST3R_PYTHON` and `NAZAR_FAST3R_WEIGHTS` (the check prints the lines).
+  3. Restart `pnpm worker`. Its first lines should say "standard geometry: Fast3R on the GPU".
+  4. Reconstruct `sample1.mp4`.
+
+  Expected:
+  - the job tag reads "GPU · Fast3R" and the viewer label reads "Fast3R · learned dense geometry";
+  - a dense cloud (≈ 270k points) of the Colosseum appears in ≈ 20 s.
+
+  If the job instead shows a "fast3r_fallback" warning, its message gives the reason. "unknown error" or "Memory allocation failure" means Windows ran short of commit memory: close heavy apps, or reboot, and retry.
+
+  The automated version is `NAZAR_E2E_FAST3R=1 pnpm test:e2e` (it uses ports 18765/15174, so your `reelbox` on 8765 is not touched).
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make
 
-- [ ] **C1. Model licences.** See `docs/research/model-selection.md`. Fast3R is FAIR **non-commercial** research licence; MASt3R is CC BY-NC-SA plus dataset terms; VGGT's commercial weights are gated behind a form and exclude military use. Confirm NAZAR is non-commercial academic work, and approve Fast3R (or name another), before any weights are downloaded.
-- [ ] **C3. CPU baseline as the documented fallback.** Until the GPU model runs, Reconstruct uses classical SfM: real but sparse geometry, no dense surface. Is that acceptable as the fallback the brief allows ("a clearly documented tested alternative")?
+- [x] **C1. Model licences.** _Answered 2026-10-27: academic, non-commercial work; Fast3R approved._ See `docs/research/model-selection.md`. Fast3R is FAIR **non-commercial** research licence; MASt3R is CC BY-NC-SA plus dataset terms; VGGT's commercial weights are gated behind a form and exclude military use. Confirm NAZAR is non-commercial academic work, and approve Fast3R (or name another), before any weights are downloaded.
+- [x] **C3. CPU baseline as the documented fallback.** _Answered 2026-10-27: accepted._ Until the GPU model runs, Reconstruct uses classical SfM: real but sparse geometry, no dense surface. Is that acceptable as the fallback the brief allows ("a clearly documented tested alternative")?
 - [ ] **C2. Hosting.** Where should the API live so that the VDI worker can reach it (A3)? Options: your laptop via a tunnel, a small cloud VM, or the college network.
 
 ## Done

@@ -2,9 +2,11 @@
 
 _Last updated: 2026-10-27_
 
-## Current milestone: **Milestone 3 (CPU baseline slice) — first real reconstruction from the sample video**
+## Current milestone: **Milestone 3 (GPU) — Fast3R dense geometry, with the CPU baseline as the visible fallback**
 
-**Reconstruct** now builds real geometry from the uploaded video with a classical structure-from-motion baseline on the CPU. The output is sparse, in a local frame, with unknown scale, and it is labelled "CPU baseline · sparse SfM" everywhere. The GPU models from the brief (Fast3R, Metric3D-v2, InstantSplat, YOLO + SAM2) are **not** integrated yet: they need licence approval (C1) and the college GPU (Milestone 1). The synthetic test pipeline still exists for plumbing checks and stays labelled as synthetic.
+**Reconstruct** now runs **Fast3R** on the GPU when the worker has the Fast3R runtime set up (`pnpm gpu:setup`; this laptop's RTX 4050 is set up). Otherwise it runs the classical CPU structure-from-motion baseline. Either way the result is in a local frame with unknown scale, and the job, every artifact and the viewer say which method ran. If Fast3R fails on a job, the job still completes with the CPU baseline and a visible `fast3r_fallback` warning that gives the reason.
+
+The other GPU models from the brief (Metric3D-v2 scale, InstantSplat, YOLO + SAM2) are **not** integrated. The college GPU (Milestone 1) has not been accessed. The synthetic test pipeline still exists for plumbing checks and stays labelled as synthetic.
 
 Checks that need you (college GPU, sound and vibration, phone, decisions) are listed in [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 
@@ -28,6 +30,65 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 | Worker | `doctor`, `stages`, and **`run`**: lease → heartbeat thread → stages → events/artifacts, with cancel, lost-lease and failure handling. Stage adapters skip with a reason. `test` = synthetic plumbing pipeline. **`standard` = CPU SfM baseline** (see the Milestone 3 report). Unusable input fails the job with a plain, non-retryable reason (`StageFailed`). |
 | Jobs (Milestone 4) | Contracts: `job.queued`, job/stage snapshot, worker lease/heartbeat/event/artifact models. API: jobs, append-only event log with atomic `seq` and idempotency keys, state machine, lease sweeper, worker routes (bearer token + lease header), artifact declare/upload with size+SHA-256 checks, WebSocket stream with REST catch-up, cancel/retry. Web: live job panel, stage table, outputs with downloads, completion sound/vibration (once per watched job, user toggles), point-cloud and camera-path layers with in-place revision swaps, fit/toggles, frame/units labels, mission kept in the URL. Readiness `worker` check is now real (last contact within 60 s). |
 | Docs | Research (sample facts corrected; preflight results), architecture (ingestion flow), environment setup (env:init, operator account), README. |
+
+## Milestone 3 report — Fast3R GPU geometry (2026-10-27, Windows 11 laptop, RTX 4050 Laptop 6 GB)
+
+### Implemented
+
+- **Isolated GPU runtime** (ADR-0004). Fast3R runs in its own Python 3.11 environment (`var/gpu/fast3r-env`, torch 2.7.1+cu126), never inside the worker. Everything is pinned: source commit `33104d4`, weights revision `a2c770b` with the checkpoint SHA-256, and an exact package freeze (`apps/worker/gpu/requirements-fast3r.txt`). `pnpm gpu:setup` installs it and `pnpm gpu:check` verifies it read-only. No token is needed.
+- **Runner** (`apps/worker/gpu/fast3r_runner.py`). It streams JSON events: `loaded`, `plan`, `chunk`, `retry`, `done` and `error`. The details:
+  - **Pass size.** It sizes passes from free VRAM. Large sequences go in overlapping passes, aligned by a robust Sim(3) fitted on the shared views. Each pass writes a partial result, so the viewer gets previews while it runs.
+  - **Out of memory.** An OOM halves the pass size in-process. A driver-level CUDA error is reported as OOM, so the worker restarts the runner smaller.
+  - **Loading.** The checkpoint is read with a streaming reader instead of memory-mapping, because Windows charges a copy-on-write map of the 2.5 GB file against commit. The model is built in fp32 on the GPU, then cast to bf16. Peak host commit is reported.
+- **Worker adapter** (`nazar_worker/fast3r.py`, `standard.py`).
+  - Runs the runner with a clean environment.
+  - Converts pointmaps into NAZAR's frame (levelled, local, unknown scale).
+  - Filters by confidence, then labels each point *observed* or *estimated* by a stated heuristic.
+  - Publishes preview and final clouds plus the camera path.
+  - Falls back to the CPU baseline with a reason.
+  - Settings come from `.env` (`NAZAR_FAST3R_*`); relative paths resolve against the env file.
+- **Web.** Shared provenance helpers (`lib/provenance.ts`). The job tag reads "GPU · Fast3R" or "CPU baseline", and the viewer label states the method. Help text explains both paths.
+- **E2E.** Opt-in Fast3R run: `NAZAR_E2E_FAST3R=1`. E2E ports moved to 18765/15174, so they never collide with other local servers.
+
+### Verified
+
+- Worker: ruff, format and strict mypy clean; 15 tests pass. API: mypy clean; `test_standard_pipeline.py` 4/4 with the GPU configured.
+- Those 4 tests cover:
+  - the CPU baseline;
+  - Fast3R dense on sample1 (all keyframes placed, more than 50k points, cameras above the levelled ground, both confidence labels present);
+  - a broken GPU runtime, which falls back visibly;
+  - an unconfigured runtime.
+- Web: lint, typecheck and Vitest pass, including the provenance tests. Playwright real-data spec passes on the CPU path and, with `NAZAR_E2E_FAST3R=1`, on the Fast3R path (twice).
+- The streaming checkpoint reader matches safetensors' own loader on all 712 tensors.
+- `scripts/setup_fast3r.py --check --hash` passes against the pinned SHA-256.
+
+### Performance-accuracy evidence
+
+Full table and discussion: `docs/research/model-selection.md` ("Fast3R vs the CPU baseline").
+
+| | sample1 (22 kf) | sample2 (78 kf) |
+|---|---|---|
+| Fast3R points | 267,786 | 205,362 |
+| CPU SfM points | 6,340 | 5,040 |
+| Fast3R geometry stage | 13.8 s, of which inference ≈ 4.5 s | 50.5 s, 15 passes |
+| Fast3R peak VRAM | 3.1 GiB | 3.9 GiB |
+| Alignment self-consistency | 1.6 % residual | 7 % median, 17 % max residual |
+
+There is no ground truth, so these numbers are density, speed and self-consistency, **not** metric accuracy. Run-to-run differences are a median of 0.0003 and a maximum of 0.015 (scene units) from GPU nondeterminism.
+
+### Known limitations
+
+- **Pass chaining on a 6 GB GPU.** On long clips (sample2) the chunk alignment drifts: the camera path shows jumps, and every point is labelled *estimated*. A skeleton-anchored alternative was measured and not adopted (see model-selection). A larger GPU (college VDI) is the expected fix, but that is untested.
+- **Windows memory.** Under WDDM the runner needs ≈ 5–8 GiB of free system commit. When the laptop runs short, CUDA fails with "unknown error" and the job falls back to the CPU baseline, visibly.
+- **No scale or ground truth.** Metric3D-v2 (scale) and telemetry are not integrated.
+- **Not interactive yet.** Confidence colouring in the viewer, measurement tools, exports (LAS/GLB) and meshing are not built.
+- **Licence.** Fast3R is non-commercial and archived upstream. It is approved for this academic project only.
+
+### Next step
+
+1. Your checks: B7 and the new B8 in `PENDING_USER_TESTS.md`.
+2. Milestone 1 on the college GPU: `pnpm gpu:check` there, then sample2 with larger passes.
+3. On the laptop: confidence colouring and measurement tools in the viewer, telemetry import, and exports.
 
 ## Milestone 3 report — CPU baseline slice (2026-10-27, Windows 11 laptop, CPU only)
 
@@ -196,7 +257,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 - **Login throttling is in memory.** It resets on restart and is per process.
 - **First-run setup trusts loopback.** Through the Vite dev proxy every request is loopback, so keep the dev server bound to 127.0.0.1 (the default) and use env bootstrap for anything exposed.
 - `pytest` shows a harmless `StarletteDeprecationWarning` (the test client wants `httpx2`; not yet vetted).
-- Real reconstruction is the **CPU SfM baseline** only (sparse). The GPU stages (Fast3R, Metric3D-v2, InstantSplat, YOLO + SAM2) are not implemented.
+- Real reconstruction is **Fast3R** (GPU, dense) or the **CPU SfM baseline** (sparse). Metric3D-v2, InstantSplat and YOLO + SAM2 are not implemented.
 - The college GPU has not been accessed.
 
 ## Next action
@@ -204,8 +265,9 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 0. **Your checks:** [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
 2. **Milestone 2 remainder:** optional telemetry import (CSV, DJI SRT) attached to a mission, with a time-alignment check against video timestamps.
-3. **Milestone 3 (GPU):** after C1 approval, a Fast3R adapter for `geometry` on the college GPU, compared against the CPU baseline on both samples. The matrix is in `docs/research/model-selection.md`.
+3. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
+4. **Viewer:** confidence colouring, measurement tools, LAS/GLB export.
 
 ## Resume instructions
 
-`pnpm install && uv sync --all-packages && pnpm env:init && pnpm check && pnpm test:e2e`, then continue from "Next action". To try it by hand: `pnpm dev`, then `pnpm worker` in a second terminal.
+`pnpm install && uv sync --all-packages && pnpm env:init && pnpm check && pnpm test:e2e` (optionally `pnpm gpu:check`), then continue from "Next action". To try it by hand: `pnpm dev`, then `pnpm worker` in a second terminal.

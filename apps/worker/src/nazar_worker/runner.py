@@ -21,7 +21,6 @@ from nazar_contracts import (
     WorkerEvent,
     WorkerLease,
 )
-from nazar_worker.baseline import build_baseline_pipeline
 from nazar_worker.client import ApiCallFailed, LeaseLost, WorkerClient
 from nazar_worker.stages import (
     Cancelled,
@@ -30,13 +29,14 @@ from nazar_worker.stages import (
     StageFailed,
     WarningSeverity,
 )
+from nazar_worker.standard import build_standard_pipeline
 from nazar_worker.test_pipeline import build_test_pipeline
 
 log = logging.getLogger("nazar_worker")
 
 
 def adapters_for(mode: PipelineMode, step_s: float) -> dict[StageName, StageAdapter]:
-    return build_test_pipeline(step_s) if mode is PipelineMode.TEST else build_baseline_pipeline()
+    return build_test_pipeline(step_s) if mode is PipelineMode.TEST else build_standard_pipeline()
 
 
 class _Heartbeat(threading.Thread):

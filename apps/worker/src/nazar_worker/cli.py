@@ -9,25 +9,48 @@ from pathlib import Path
 
 from nazar_contracts import PipelineMode
 from nazar_worker import __version__
-from nazar_worker.baseline import Skip, build_baseline_pipeline
 from nazar_worker.client import WorkerClient
 from nazar_worker.doctor import collect
+from nazar_worker.fast3r import Fast3rRuntime
 from nazar_worker.runner import run_loop
 from nazar_worker.stages import STAGE_PLAN
+from nazar_worker.standard import Skip, build_standard_pipeline
 
 TOKEN_VAR = "NAZAR_WORKER_TOKEN"  # noqa: S105 - the variable name, not a value
+
+
+FAST3R_VARS = ("NAZAR_FAST3R_PYTHON", "NAZAR_FAST3R_WEIGHTS", "NAZAR_FAST3R_MAX_VIEWS")
+FAST3R_PATHS = {"NAZAR_FAST3R_PYTHON", "NAZAR_FAST3R_WEIGHTS"}
+
+
+def _dotenv(env_file: Path | None) -> dict[str, str]:
+    if env_file is None or not env_file.is_file():
+        return {}
+    values = {}
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        name, sep, raw = line.partition("=")
+        if sep and not name.lstrip().startswith("#"):
+            values[name.strip()] = raw.strip().strip("'\"")
+    return values
 
 
 def _token(env_file: Path | None) -> str | None:
     """Read the worker token from the environment, else from a dotenv file. Never printed."""
     value = os.environ.get(TOKEN_VAR, "").strip()
-    if value or env_file is None or not env_file.is_file():
-        return value or None
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        name, sep, raw = line.partition("=")
-        if sep and name.strip() == TOKEN_VAR:
-            return raw.strip().strip("'\"") or None
-    return None
+    return value or _dotenv(env_file).get(TOKEN_VAR) or None
+
+
+def _load_fast3r_settings(env_file: Path | None) -> None:
+    """Fill the Fast3R settings (paths, not secrets) from the dotenv file when the environment
+    does not set them; relative paths are relative to the dotenv file's folder (repo root)."""
+    values = _dotenv(env_file)
+    for name in FAST3R_VARS:
+        value = values.get(name, "")
+        if name in os.environ or not value:
+            continue
+        if name in FAST3R_PATHS and env_file is not None and not Path(value).is_absolute():
+            value = str((env_file.resolve().parent / value).resolve())
+        os.environ[name] = value
 
 
 def _default_worker_id() -> str:
@@ -62,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stages":
         standard = {
             stage
-            for stage, adapter in build_baseline_pipeline().items()
+            for stage, adapter in build_standard_pipeline().items()
             if not isinstance(adapter, Skip)
         }
         for plan in STAGE_PLAN:
@@ -85,6 +108,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if PipelineMode.STANDARD in modes:
+        _load_fast3r_settings(args.env_file)
+        runtime = Fast3rRuntime.from_env()
+        logging.getLogger("nazar_worker").info(
+            "standard geometry: %s",
+            "Fast3R on the GPU (CPU baseline as fallback)"
+            if isinstance(runtime, Fast3rRuntime)
+            else f"CPU baseline. {runtime}",
+        )
     client = WorkerClient(args.api, token)
     try:
         run_loop(
