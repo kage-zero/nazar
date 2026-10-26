@@ -9,7 +9,7 @@ const WEB_PORT = 5174;
 // Set here, in the main process, so every worker inherits the same value.
 process.env.NAZAR_E2E_RUN ??= String(Date.now());
 // Random per run, shared only by the E2E API and the E2E worker. Never written to disk.
-process.env.NAZAR_E2E_WORKER_TOKEN ??= randomBytes(24).toString('hex');
+const WORKER_TOKEN = (process.env.NAZAR_E2E_WORKER_TOKEN ??= randomBytes(24).toString('hex'));
 
 /**
  * Fast deterministic E2E profile: real FastAPI + real worker (test pipeline) + real Vite dev
@@ -66,24 +66,26 @@ export default defineConfig({
         NAZAR_WEB_ORIGINS: `http://127.0.0.1:${WEB_PORT}`,
         NAZAR_DATABASE_URL: '',
         NAZAR_SECRET_KEY: '',
-        NAZAR_WORKER_TOKEN: process.env.NAZAR_E2E_WORKER_TOKEN,
+        NAZAR_WORKER_TOKEN: WORKER_TOKEN,
         NAZAR_WORKER_LEASE_SECONDS: '15',
         NAZAR_BOOTSTRAP_ADMIN_EMAIL: '',
         NAZAR_BOOTSTRAP_ADMIN_PASSWORD: '',
       },
     },
-    {
-      // The real worker process in test-pipeline mode, paced so stage transitions and
-      // preview revisions are observable in the browser.
+    // Two real worker processes, as in deployment (light worker + reconstruction worker), so
+    // a long real reconstruction never blocks the quick test-pipeline specs.
+    ...(['test', 'standard'] as const).map((mode) => ({
+      // The test pipeline is paced so stage transitions and previews are observable.
       command:
         `uv run --package nazar-worker nazar-worker run --api http://127.0.0.1:${API_PORT} ` +
-        '--modes test --step-delay 0.8 --poll 0.5 --heartbeat 4 --env-file __none__',
+        `--modes ${mode} --worker-id e2e-${mode} --step-delay 0.8 --poll 0.5 --heartbeat 4 ` +
+        '--env-file __none__',
       cwd: REPO_ROOT,
-      wait: { stderr: /polling for test jobs/ },
+      wait: { stderr: new RegExp(`polling for ${mode} jobs`) },
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { NAZAR_WORKER_TOKEN: process.env.NAZAR_E2E_WORKER_TOKEN },
-    },
+      env: { NAZAR_WORKER_TOKEN: WORKER_TOKEN },
+    })),
     {
       command: `pnpm exec vite --port ${WEB_PORT} --strictPort --host 127.0.0.1`,
       url: `http://127.0.0.1:${WEB_PORT}`,

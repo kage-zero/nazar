@@ -100,3 +100,72 @@ test('a running job survives a reload, can be cancelled and retried', async ({ p
   await panel.getByRole('button', { name: 'Retry' }).click();
   await expect(status).toHaveAttribute('data-status', 'completed', { timeout: 90_000 });
 });
+
+// REAL DATA: the supplied drone clip through the real preflight and the CPU geometry baseline
+// (classical structure-from-motion). Nothing here is synthetic.
+test('reconstruct builds real geometry from the sample video, progressively', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'CPU-heavy; one viewport is enough.');
+  test.setTimeout(300_000);
+  const errors = collectConsoleErrors(page);
+  await createMission(page, 'Real');
+  await uploadSample(page);
+
+  const panel = page.getByTestId('job-panel');
+  await panel.getByRole('button', { name: 'Reconstruct' }).click();
+  await expect(panel.getByText('CPU baseline', { exact: true })).toBeVisible();
+
+  // A real preview cloud arrives while the job is still running.
+  await page.waitForFunction(
+    () => {
+      const stage = document.querySelector('[data-testid="viewer-stage"]');
+      const status = document.querySelector('[data-testid="job-status"]');
+      return (
+        stage?.getAttribute('data-cloud-kind') === 'point_cloud_preview' &&
+        Number(stage.getAttribute('data-cloud-points')) > 500 &&
+        status?.getAttribute('data-status') !== 'completed'
+      );
+    },
+    undefined,
+    { timeout: 200_000 },
+  );
+  await expect(page.getByText('CPU baseline · sparse SfM')).toBeVisible();
+
+  const status = page.getByTestId('job-status');
+  await expect(status).toHaveAttribute('data-status', 'completed', { timeout: 200_000 });
+  const viewer = page.getByTestId('viewer-stage');
+  await expect(viewer).toHaveAttribute('data-cloud-kind', 'point_cloud');
+  const finalPoints = Number(await viewer.getAttribute('data-cloud-points'));
+  expect(finalPoints).toBeGreaterThan(3000);
+
+  const pipeline = page.getByTestId('pipeline');
+  await expect(pipeline.locator('[data-stage="geometry"]')).toHaveAttribute(
+    'data-state',
+    'completed',
+  );
+  await expect(pipeline.locator('[data-stage="depth_priors"]')).toHaveAttribute(
+    'data-state',
+    'skipped',
+  );
+  await expect(page.getByTestId('job-warnings')).toContainText('distances are relative');
+
+  // The report is real JSON describing the geometry that was produced.
+  const href = await page
+    .getByTestId('job-outputs')
+    .locator('li', { hasText: /^Processing report/ })
+    .getByRole('link', { name: 'Download' })
+    .getAttribute('href');
+  const report = (await (await page.request.get(href ?? '')).json()) as {
+    geometry: { registered_keyframes: number; points: number; mean_reproj_px: number };
+    coordinate_frame: { scale_status: string };
+  };
+  expect(report.geometry.registered_keyframes).toBeGreaterThanOrEqual(18);
+  // The report describes the cloud the viewer shows (the filtered one), not the raw SfM output.
+  expect(report.geometry.points).toBe(finalPoints);
+  expect(report.geometry.mean_reproj_px).toBeLessThan(1.5);
+  expect(report.coordinate_frame.scale_status).toBe('unknown');
+
+  await page.screenshot({ path: testInfo.outputPath('reconstruct-complete.png'), fullPage: true });
+  expect(errors).toEqual([]);
+});

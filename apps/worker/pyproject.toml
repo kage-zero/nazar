@@ -6,7 +6,13 @@ requires-python = ">=3.12,<3.13"
 # Research-model stacks (Fast3R, Metric3D-v2, SAM2, ...) are NOT dependencies of this
 # package. Each runs in its own pinned environment behind a file contract; see
 # docs/decisions/ADR-0004-isolated-model-environments.md.
-dependencies = ["nazar-contracts"]
+dependencies = [
+  "nazar-contracts",
+  # Classical CPU geometry baseline (SIFT + essential matrix + PnP + bundle adjustment).
+  "numpy>=2.3",
+  "opencv-python-headless>=5.0,<6",
+  "scipy>=1.16",
+]
 
 [project.scripts]
 nazar-worker = "nazar_worker.cli:main"

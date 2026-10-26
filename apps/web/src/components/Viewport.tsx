@@ -1,3 +1,4 @@
+import type { ArtifactManifest } from '@nazar/contracts';
 import { lazy, Suspense } from 'react';
 import { useViewerStore } from '../state/viewerStore';
 import { Button, Card, Tag } from './ui';
@@ -19,6 +20,12 @@ const SCALE_TEXT = {
   metric_sensor: 'metric (sensor)',
 } as const;
 
+function sourceText(cloud: ArtifactManifest | null): string {
+  if (!cloud) return 'No geometry';
+  if (cloud.provenance.producer.endsWith('/sfm-baseline')) return 'CPU baseline · sparse SfM';
+  return cloud.provenance.model ?? 'Reconstruction';
+}
+
 export function Viewport() {
   const s = useViewerStore();
   const { cloud, path, loaded } = s;
@@ -39,7 +46,7 @@ export function Viewport() {
         {synthetic ? (
           <Tag tone="mint">Test pipeline · synthetic scene</Tag>
         ) : (
-          <Tag tone="mint">{cloud ? 'Reconstruction' : 'No geometry'}</Tag>
+          <Tag tone="mint">{sourceText(cloud)}</Tag>
         )}
       </div>
 

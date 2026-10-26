@@ -3,16 +3,20 @@
 import struct
 from collections.abc import Sequence
 
+import numpy as np
+import numpy.typing as npt
+
 Point = tuple[float, float, float, int, int, int]
 
 _RECORD = struct.Struct("<fffBBB")
+_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("r", "u1"), ("g", "u1"), ("b", "u1")])
 
 
-def write_ply(points: Sequence[Point], comments: Sequence[str] = ()) -> bytes:
+def _header(count: int, comments: Sequence[str]) -> bytes:
     header = ["ply", "format binary_little_endian 1.0"]
     header += [f"comment {c}" for c in comments]
     header += [
-        f"element vertex {len(points)}",
+        f"element vertex {count}",
         "property float x",
         "property float y",
         "property float z",
@@ -21,8 +25,23 @@ def write_ply(points: Sequence[Point], comments: Sequence[str] = ()) -> bytes:
         "property uchar blue",
         "end_header",
     ]
-    body = b"".join(_RECORD.pack(*p) for p in points)
-    return ("\n".join(header) + "\n").encode("ascii") + body
+    return ("\n".join(header) + "\n").encode("ascii")
+
+
+def write_ply(points: Sequence[Point], comments: Sequence[str] = ()) -> bytes:
+    return _header(len(points), comments) + b"".join(_RECORD.pack(*p) for p in points)
+
+
+def write_ply_arrays(
+    xyz: npt.NDArray[np.float64], rgb: npt.NDArray[np.uint8], comments: Sequence[str] = ()
+) -> bytes:
+    """Same format as `write_ply`, from (n, 3) arrays without per-point Python work."""
+    rec = np.empty(len(xyz), dtype=_DTYPE)
+    for i, axis in enumerate("xyz"):
+        rec[axis] = xyz[:, i]
+    for i, channel in enumerate("rgb"):
+        rec[channel] = rgb[:, i]
+    return _header(len(xyz), comments) + rec.tobytes()
 
 
 def read_ply(data: bytes) -> list[Point]:

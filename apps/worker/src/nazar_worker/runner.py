@@ -21,12 +21,13 @@ from nazar_contracts import (
     WorkerEvent,
     WorkerLease,
 )
+from nazar_worker.baseline import build_baseline_pipeline
 from nazar_worker.client import ApiCallFailed, LeaseLost, WorkerClient
 from nazar_worker.stages import (
-    ADAPTERS,
     Cancelled,
     StageAdapter,
     StageContext,
+    StageFailed,
     WarningSeverity,
 )
 from nazar_worker.test_pipeline import build_test_pipeline
@@ -35,7 +36,7 @@ log = logging.getLogger("nazar_worker")
 
 
 def adapters_for(mode: PipelineMode, step_s: float) -> dict[StageName, StageAdapter]:
-    return build_test_pipeline(step_s) if mode is PipelineMode.TEST else ADAPTERS
+    return build_test_pipeline(step_s) if mode is PipelineMode.TEST else build_baseline_pipeline()
 
 
 class _Heartbeat(threading.Thread):
@@ -119,12 +120,16 @@ class JobRun:
         def preflight() -> dict[str, Any]:
             return self.client.preflight(self.lease.job_id)
 
+        def keyframe(image: int) -> bytes:
+            return self.client.keyframe(self.lease.job_id, image)
+
         return StageContext(
             lease=self.lease,
             progress=progress,
             warn=warn,
             publish=publish,
             preflight=preflight,
+            keyframe=keyframe,
             check_cancel=self.check_cancel,
         )
 
@@ -158,6 +163,9 @@ class JobRun:
         except LeaseLost:
             log.warning("lease lost; dropping job %s", self.lease.job_id)
             return "lost"
+        except StageFailed as exc:
+            log.info("job %s cannot be reconstructed: %s", self.lease.job_id, exc)
+            return self._fail(str(exc), exc.retryable)
         except Exception as exc:
             log.exception("job %s failed", self.lease.job_id)
             try:
@@ -172,6 +180,17 @@ class JobRun:
         finally:
             self.heartbeat.stop()
 
+    def _fail(self, reason: str, retryable: bool) -> str:
+        try:
+            self.send(
+                "job:failed",
+                EventType.JOB_FAILED,
+                data={"reason": reason[:500], "retryable": retryable},
+            )
+        except (LeaseLost, ApiCallFailed):
+            return "lost"
+        return "failed"
+
     def _skip(self, stage: StageName, reason: str) -> None:
         self.send(f"{stage.value}:skipped", EventType.STAGE_SKIPPED, stage, {"reason": reason})
 
@@ -181,7 +200,14 @@ class JobRun:
             self._skip(stage, reason)
             return
         started = time.monotonic()
-        self.send(f"{stage.value}:started", EventType.STAGE_STARTED, stage)
+        try:
+            self.send(f"{stage.value}:started", EventType.STAGE_STARTED, stage)
+        except ApiCallFailed as exc:
+            # The user may cancel between our last check and this start; the API then refuses
+            # the new stage. That is a cancellation, not a worker error.
+            if exc.status == 409 and self.client.heartbeat(self.lease.job_id).cancel_requested:
+                raise Cancelled from exc
+            raise
         adapter.run(self._context(stage))
         self.send(
             f"{stage.value}:completed",

@@ -31,7 +31,7 @@ export const STAGE_COPY: Record<StageName, { label: string; detail: string; opti
   },
   dense_reconstruction: {
     label: 'Dense scene',
-    detail: 'Filtered cloud + Gaussian scene',
+    detail: 'Filtered point cloud (Gaussian scene needs the GPU)',
     optional: false,
   },
   surface_processing: {
@@ -40,7 +40,11 @@ export const STAGE_COPY: Record<StageName, { label: string; detail: string; opti
     optional: true,
   },
   analysis: { label: 'Confidence', detail: 'Observed / estimated / inferred', optional: false },
-  exporting: { label: 'Export & report', detail: 'PLY, GLB, LAS, report', optional: false },
+  exporting: {
+    label: 'Export & report',
+    detail: 'Point cloud, camera path, report',
+    optional: false,
+  },
 };
 
 const STATE_TEXT: Record<StageRunState, string> = {

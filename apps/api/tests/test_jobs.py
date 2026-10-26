@@ -18,10 +18,11 @@ from nazar_api.jobs import expire_leases
 from nazar_api.main import create_app
 from nazar_api.models import AssetRecord, JobRecord, utcnow
 from nazar_api.storage import PREFLIGHT_DIR, asset_dir
-from nazar_contracts import PipelineMode
+from nazar_contracts import PipelineMode, StageName, WorkerLease
 from nazar_worker.client import WorkerClient
 from nazar_worker.ply import read_ply
-from nazar_worker.runner import run_loop
+from nazar_worker.runner import JobRun, run_loop
+from nazar_worker.stages import StageContext
 
 TOKEN = "test-only-worker-token-not-a-secret"
 WORKER = {"Authorization": f"Bearer {TOKEN}", **HEADERS}
@@ -60,7 +61,8 @@ def ready_mission(client: TestClient) -> str:
     (folder / "keyframes").mkdir(parents=True)
     for i in range(1, KEYFRAMES + 1):
         (folder / "keyframes" / f"{i:04d}.jpg").write_bytes(b"\xff\xd8fake")
-    (folder / "preflight.json").write_text(json.dumps({"keyframes": list(range(KEYFRAMES))}))
+    keyframes = [{"index": 10 * i, "t": i / 2, "image": i} for i in range(1, KEYFRAMES + 1)]
+    (folder / "preflight.json").write_text(json.dumps({"keyframes": keyframes}))
     return str(mission["id"])
 
 
@@ -348,15 +350,46 @@ def test_cancel_queued_job_is_immediate_and_running_job_waits_for_worker(
     assert retried["status"] == "queued" and retried["attempt"] == 2
 
 
-def test_standard_pipeline_fails_honestly_until_geometry_exists(app_client: TestClient) -> None:
+def test_standard_pipeline_fails_honestly_on_unusable_input(app_client: TestClient) -> None:
+    # The fixture keyframes are not real JPEGs: the baseline must stop with a plain reason
+    # and publish nothing, rather than produce geometry from nothing.
     job = start_job(app_client, ready_mission(app_client), pipeline="standard")
     run_loop(worker_client(app_client), "w1", [PipelineMode.STANDARD], once=True)
     snap = app_client.get(f"/api/jobs/{job['id']}").json()
     assert snap["status"] == "failed"
     assert snap["retryable"] is False
-    assert "no implementation" in snap["error"]
+    assert snap["error"] == "Keyframe 1 could not be decoded."
     assert snap["artifacts"] == []
     assert app_client.post(f"/api/jobs/{job['id']}/retry").status_code == 409
+
+
+class _CancelBeforeStart:
+    """Simulates the user pressing Cancel after the worker's last cancel check but before
+    it reports `stage.started` (the window between the two)."""
+
+    def __init__(self, client: TestClient, job_id: str) -> None:
+        self.client, self.job_id = client, job_id
+
+    def skip_reason(self, lease: WorkerLease) -> str | None:
+        assert self.client.post(f"/api/jobs/{self.job_id}/cancel").status_code == 200
+        return None
+
+    def run(self, ctx: StageContext) -> None:
+        raise AssertionError("must not run after cancellation")
+
+
+def test_cancel_racing_a_stage_start_ends_cancelled_not_failed(app_client: TestClient) -> None:
+    job = start_job(app_client, ready_mission(app_client))
+    worker = worker_client(app_client)
+    lease = worker.lease("w1", [PipelineMode.TEST])
+    assert lease is not None
+    run = JobRun(
+        worker, lease, {StageName.PREPROCESSING: _CancelBeforeStart(app_client, job["id"])}, 60
+    )
+    assert run.execute() == "cancelled"
+    snap = app_client.get(f"/api/jobs/{job['id']}").json()
+    assert snap["status"] == "cancelled"
+    assert snap["error"] is None
 
 
 def test_jobs_are_private(app_client: TestClient) -> None:

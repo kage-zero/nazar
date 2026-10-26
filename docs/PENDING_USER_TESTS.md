@@ -41,11 +41,13 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
   - Browsers may block audio until you have clicked on the page; then no sound plays and the page says nothing about sound.
 - [ ] **B4. Vibration (phone only).** Open the app on an Android phone on the same network. This needs `NAZAR_WEB_ORIGINS` plus Vite `--host`; ask me and I'll set it up. Expected: a short vibration on completion. On desktops the browser accepts the request but has no motor.
 - [ ] **B5. Reconnect.** Start a job, turn Wi-Fi off for about 10 s, then turn it on again. Expected: the badge shows "Reconnecting…", then the job continues with no missing stages.
+- [ ] **B7. Real reconstruction.** Upload `docs/sample/video/sample1.mp4`, wait for validation, press **Reconstruct**. Expected: preview clouds appear while "Multi-view geometry" runs (about 10–35 s on a laptop), and the final cloud shows the Colosseum's oval ring from above (orbit the view). The camera path forms an arc above the ground. Tags read "CPU baseline". Try `sample2.mp4` too (78 keyframes, slower).
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make
 
-- [ ] **C1. Model licences.** Milestone 3 will propose the first geometry model with its licence and weight terms. Approve it before any weights are downloaded.
+- [ ] **C1. Model licences.** See `docs/research/model-selection.md`. Fast3R is FAIR **non-commercial** research licence; MASt3R is CC BY-NC-SA plus dataset terms; VGGT's commercial weights are gated behind a form and exclude military use. Confirm NAZAR is non-commercial academic work, and approve Fast3R (or name another), before any weights are downloaded.
+- [ ] **C3. CPU baseline as the documented fallback.** Until the GPU model runs, Reconstruct uses classical SfM: real but sparse geometry, no dense surface. Is that acceptable as the fallback the brief allows ("a clearly documented tested alternative")?
 - [ ] **C2. Hosting.** Where should the API live so that the VDI worker can reach it (A3)? Options: your laptop via a tunnel, a small cloud VM, or the college network.
 
 ## Done

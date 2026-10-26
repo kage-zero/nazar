@@ -9,10 +9,11 @@ from pathlib import Path
 
 from nazar_contracts import PipelineMode
 from nazar_worker import __version__
+from nazar_worker.baseline import Skip, build_baseline_pipeline
 from nazar_worker.client import WorkerClient
 from nazar_worker.doctor import collect
 from nazar_worker.runner import run_loop
-from nazar_worker.stages import ADAPTERS, STAGE_PLAN
+from nazar_worker.stages import STAGE_PLAN
 
 TOKEN_VAR = "NAZAR_WORKER_TOKEN"  # noqa: S105 - the variable name, not a value
 
@@ -44,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--api", default=os.environ.get("NAZAR_API_BASE_URL", "http://127.0.0.1:8000"))
     run.add_argument(
         "--modes",
-        default="test",
+        default="test,standard",
         help="Comma-separated pipelines to accept: test (deterministic fixtures), standard.",
     )
     run.add_argument("--worker-id", default=_default_worker_id())
@@ -59,8 +60,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(collect(args.workdir), indent=2))
         return 0
     if args.command == "stages":
+        standard = {
+            stage
+            for stage, adapter in build_baseline_pipeline().items()
+            if not isinstance(adapter, Skip)
+        }
         for plan in STAGE_PLAN:
-            state = "implemented" if plan.stage in ADAPTERS else "not implemented"
+            state = "implemented" if plan.stage in standard else "not implemented"
             kind = "optional" if plan.optional else "required"
             print(
                 f"{plan.stage.value:22} {kind:9} M{plan.milestone:<3} {state:16} {plan.component}"
@@ -78,12 +84,6 @@ def main(argv: list[str] | None = None) -> int:
             f"{TOKEN_VAR} is not set (environment or --env-file). Nothing was run.", file=sys.stderr
         )
         return 2
-    if PipelineMode.STANDARD in modes and not ADAPTERS:
-        print(
-            "Note: no real reconstruction stages are implemented yet; standard jobs will fail "
-            "with an explanation at the geometry stage.",
-            file=sys.stderr,
-        )
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     client = WorkerClient(args.api, token)
     try:

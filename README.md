@@ -9,7 +9,7 @@ Single-pass drone video → progressively revealed 3D reconstruction.
 ```text
 apps/web            React 19 + TypeScript + Vite + React Three Fiber + Tailwind v4 + Zustand
 apps/api            FastAPI service (Python 3.12, uv) — auth, missions, uploads, preflight
-apps/worker         Reconstruction worker CLI (doctor, stage plan, job loop; synthetic test pipeline)
+apps/worker         Reconstruction worker CLI (doctor, stage plan, job loop; CPU SfM baseline + synthetic test pipeline)
 packages/contracts  Pydantic contracts → JSON Schema → generated TypeScript
 packages/media      FFmpeg probe/decode, frame quality metrics, keyframe selection (CPU)
 infra/              Optional docker-compose (PostGIS, Redis, MinIO)
@@ -23,7 +23,7 @@ pnpm install
 uv sync --all-packages
 pnpm env:init               # creates .env and generates local machine secrets (prints names only)
 pnpm dev                    # web http://127.0.0.1:5173  ·  API http://127.0.0.1:8000/docs
-pnpm worker                 # second terminal: worker running the synthetic test pipeline
+pnpm worker                 # second terminal: worker for the CPU baseline (Reconstruct) and the test pipeline
                             # first visit: create the operator account in the web app
 ```
 

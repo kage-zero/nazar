@@ -134,6 +134,11 @@ class WorkerClient:
         result: dict[str, Any] = self._json("GET", f"/api/worker/jobs/{job_id}/inputs/preflight")
         return result
 
+    def keyframe(self, job_id: str, image: int) -> bytes:
+        """One extracted keyframe JPEG (`image` is the 1-based number from the preflight)."""
+        _, data = self._request("GET", f"/api/worker/jobs/{job_id}/inputs/keyframes/{image}.jpg")
+        return data
+
     def publish(self, job_id: str, declared: ArtifactCreate, content: bytes) -> ArtifactCreated:
         created = ArtifactCreated.model_validate(
             self._json("POST", f"/api/worker/jobs/{job_id}/artifacts", declared)

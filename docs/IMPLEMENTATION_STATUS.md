@@ -2,9 +2,9 @@
 
 _Last updated: 2026-10-27_
 
-## Current milestone: **Milestone 4 — job/event/worker plumbing done with a synthetic test pipeline**
+## Current milestone: **Milestone 3 (CPU baseline slice) — first real reconstruction from the sample video**
 
-Real reconstruction (Milestone 3) is **not** built. Everything that streams into the viewer today comes from a fixed synthetic scene and is labelled as such everywhere.
+**Reconstruct** now builds real geometry from the uploaded video with a classical structure-from-motion baseline on the CPU. The output is sparse, in a local frame, with unknown scale, and it is labelled "CPU baseline · sparse SfM" everywhere. The GPU models from the brief (Fast3R, Metric3D-v2, InstantSplat, YOLO + SAM2) are **not** integrated yet: they need licence approval (C1) and the college GPU (Milestone 1). The synthetic test pipeline still exists for plumbing checks and stays labelled as synthetic.
 
 Checks that need you (college GPU, sound and vibration, phone, decisions) are listed in [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 
@@ -25,9 +25,88 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 | Media (`packages/media`, new) | ffprobe parsing (rotation, display size, attached pictures ignored). Packet timestamps; VFR decided from real intervals. Single-pass FFmpeg decode at 320 px gray via argv (no shell). Per-frame sharpness (Laplacian variance), brightness and clipping, change, sub-pixel phase-correlation motion, 48-px viewpoint signature. Flags: blurry, dark, over-exposed, repeated. Keyframe selection by viewpoint novelty with min/max gap, sharpest-in-look-ahead, and a cap of 96. Full-res + thumbnail JPEG extraction, atomic writes, cancellation, `too_long` / `undecodable` / `unreadable` errors. |
 | API | First Alembic revision (users, sessions, missions, assets), auto-applied on start. Operator accounts: first-run setup (loopback only, no account yet, never in production) or env bootstrap; scrypt hashes; server-side sessions (SHA-256 of an HttpOnly SameSite=Lax cookie, Secure in production); login throttling; `X-Nazar-Request` CSRF guard on all mutations. Owner-scoped missions. Resumable chunked upload with offset checking (409 returns the server offset), size and extension limits, server-generated storage paths, SHA-256. Background validation/preflight on one thread with live progress, cancel, retry after an internal failure, and re-queue on restart. Routes for the preflight report and keyframe/thumbnail images. Readiness gained an `accounts` check. |
 | Web | First-run setup / sign-in, sign-out. Mission create/select. Real upload: chunked XHR with byte progress, cancel, automatic retry with backoff, and resume of an interrupted upload by re-choosing the same file. Validation progress by phase. Rejected/failed states with Remove/Retry. Preflight panel: facts, findings by severity, sharpness-over-time chart (flagged bands, keyframe ticks, hover/keyboard readout), keyframe strip, and a keyframe table. |
-| Worker | `doctor`, `stages`, and **`run`**: lease → heartbeat thread → stages → events/artifacts, with cancel, lost-lease and failure handling. Stage adapters skip with a reason. Only the synthetic `test` pipeline has adapters; `standard` fails honestly ("no implementation"). |
+| Worker | `doctor`, `stages`, and **`run`**: lease → heartbeat thread → stages → events/artifacts, with cancel, lost-lease and failure handling. Stage adapters skip with a reason. `test` = synthetic plumbing pipeline. **`standard` = CPU SfM baseline** (see the Milestone 3 report). Unusable input fails the job with a plain, non-retryable reason (`StageFailed`). |
 | Jobs (Milestone 4) | Contracts: `job.queued`, job/stage snapshot, worker lease/heartbeat/event/artifact models. API: jobs, append-only event log with atomic `seq` and idempotency keys, state machine, lease sweeper, worker routes (bearer token + lease header), artifact declare/upload with size+SHA-256 checks, WebSocket stream with REST catch-up, cancel/retry. Web: live job panel, stage table, outputs with downloads, completion sound/vibration (once per watched job, user toggles), point-cloud and camera-path layers with in-place revision swaps, fit/toggles, frame/units labels, mission kept in the URL. Readiness `worker` check is now real (last contact within 60 s). |
 | Docs | Research (sample facts corrected; preflight results), architecture (ingestion flow), environment setup (env:init, operator account), README. |
+
+## Milestone 3 report — CPU baseline slice (2026-10-27, Windows 11 laptop, CPU only)
+
+### Implemented
+
+- `sfm.py`, a classical incremental SfM:
+  - SIFT features, windowed mutual matching, essential-matrix RANSAC, union-find tracks;
+  - an initial pair chosen for parallax (planar and rotation-only pairs are rejected);
+  - EPnP registration and parallax-gated triangulation;
+  - sparse bundle adjustment with an analytic Jacobian, Huber loss and a shared estimated focal length;
+  - pruning, normalisation and up-alignment by a RANSAC plane fit.
+  - It yields a preview snapshot after initialisation and after every 4 registrations, and stops at safe points when a job is cancelled.
+- `baseline.py`, the standard pipeline:
+  - keyframes are fetched from the API;
+  - `preview-{n}` point clouds stream while geometry runs;
+  - the final cloud is a statistically filtered one, published with the camera path (poses + estimated focal length);
+  - each point is labelled observed or estimated;
+  - a processing report (`nazar.processing-report/1`) records the method, statistics, confidence rule, coordinate frame, timings, resources, skip reasons and limitations.
+  - Depth priors, dynamics and surface are skipped with reasons; sensor fusion is skipped when there is no telemetry.
+- Web:
+  - **Reconstruct** is enabled and starts the standard pipeline.
+  - The job tag reads "CPU baseline". The viewer tag comes from artifact provenance ("CPU baseline · sparse SfM").
+  - Stage copy no longer promises outputs this run cannot make (no GLB/LAS/Gaussian claims).
+- Dependencies (worker only): `opencv-python-headless` 5.0 (Apache-2.0), `scipy` 1.18 (BSD-3), plus `scipy-stubs` for dev. No model weights.
+- `docs/research/model-selection.md`: licence and hardware matrix for Fast3R, VGGT, MASt3R and COLMAP, verified on the official repositories. Nothing was downloaded.
+
+### Verified
+
+- Worker pytest, 14 tests:
+  - bundle adjustment recovers a perturbed synthetic scene and an 8 % focal error back to the injected 0.3 px noise;
+  - triangulation refuses zero-parallax pairs;
+  - up-alignment levels a tilted ground plane;
+  - the array PLY writer is byte-identical to the tuple writer;
+  - **real `sample1.mp4` → real preflight → reconstruction**: previews grow monotonically, ≥ 80 % of keyframes are registered, ≥ 3000 points, mean reprojection < 1.5 px, and the cameras sit above the ground.
+- The analytic BA Jacobian matches finite differences to 1e-8.
+- API test: a standard job on undecodable keyframes fails with "Keyframe 1 could not be decoded.", is not retryable, and publishes no artifacts.
+- Playwright **real-data E2E** (desktop):
+  - upload sample1, press Reconstruct, and a real preview cloud (> 500 points) renders *while the job is still running*;
+  - the job completes and the final cloud has > 3000 points;
+  - geometry shows done and depth priors show skipped;
+  - the unknown-scale warning is shown;
+  - the downloaded report has ≥ 18 registered keyframes, mean reprojection < 1.5 px, `scale_status: unknown`, and a point count equal to the cloud on screen;
+  - no console errors.
+- E2E now runs two real worker processes (test and standard), as in deployment.
+- **Bug found and fixed by the fuller E2E:** a Cancel that landed between the worker's cancel check and its next `stage.started` made the job end *failed* instead of *cancelled*. The worker now asks the API when a stage start is refused, and reports a cancellation when that is the reason. A deterministic API regression test injects the cancel at exactly that point; it fails without the fix.
+- Totals: `pnpm check` 15/15 (API 35, worker 14, media 13, contracts 7, web 24). Playwright 23 passed, 2 skipped (desktop-only by design).
+- The final screenshot was reviewed: the Colosseum's oval ring is visible.
+
+### Performance-accuracy evidence
+
+sample1 (22 keyframes, 640×360):
+
+| Measure | Result |
+|---|---|
+| Registered keyframes | 22 / 22 |
+| Points (raw / after outlier filter) | 6454 / 6340 |
+| Observed / estimated points | 4518 / 1822 |
+| Mean reprojection | 0.63 px |
+| BA RMS (Huber) | 1.06 px |
+| Estimated focal length | ≈ 481 px |
+| Standalone timing | first preview ≈ 8–13 s, total ≈ 18 s |
+| Timing inside the busy E2E run (browser + API + 2 workers on the same laptop) | first preview 18.5 s, geometry 34.3 s |
+
+There is no ground truth for the sample, so absolute accuracy is **not measured**. The reprojection error measures internal consistency only.
+
+### Known limitations
+
+- Sparse points only. There is no dense surface, mesh or Gaussian scene; textureless areas are empty.
+- Unknown scale and a local frame. Up is estimated from the dominant plane.
+- The focal length is not calibrated, and no lens distortion is modelled.
+- Footage that only rotates or hovers has no parallax: the job fails with a reason instead of inventing geometry.
+- sample2 (78 keyframes) has not yet been run end to end through the UI (B7).
+- The GPU models from the brief are not integrated (C1 licence approval + Milestone 1 GPU access).
+
+### Next step
+
+1. Get C1 and C3 answers, and access to the college GPU.
+2. Write a Fast3R adapter for the `geometry` stage behind the same contract. The CPU baseline stays as the fallback.
+3. Meanwhile, on CPU: telemetry import, measurement tools and confidence colouring in the viewer.
 
 ## Milestone 4 report (2026-10-27, Windows 11 laptop, CPU only)
 
@@ -117,7 +196,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 - **Login throttling is in memory.** It resets on restart and is per process.
 - **First-run setup trusts loopback.** Through the Vite dev proxy every request is loopback, so keep the dev server bound to 127.0.0.1 (the default) and use env bootstrap for anything exposed.
 - `pytest` shows a harmless `StarletteDeprecationWarning` (the test client wants `httpx2`; not yet vetted).
-- Every real reconstruction stage is **not implemented**. The viewer shows geometry only from the labelled synthetic test pipeline.
+- Real reconstruction is the **CPU SfM baseline** only (sparse). The GPU stages (Fast3R, Metric3D-v2, InstantSplat, YOLO + SAM2) are not implemented.
 - The college GPU has not been accessed.
 
 ## Next action
@@ -125,7 +204,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 0. **Your checks:** [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
 2. **Milestone 2 remainder:** optional telemetry import (CSV, DJI SRT) attached to a mission, with a time-alignment check against video timestamps.
-3. **Milestone 3:** research matrix for the first geometry model (licence, weights, VRAM on 6 GB vs the college GPU), then the first honest point-cloud preview from the selected keyframes.
+3. **Milestone 3 (GPU):** after C1 approval, a Fast3R adapter for `geometry` on the college GPU, compared against the CPU baseline on both samples. The matrix is in `docs/research/model-selection.md`.
 
 ## Resume instructions
 
