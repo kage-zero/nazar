@@ -30,7 +30,7 @@ def test_ready_reports_blank_secrets_as_not_configured(tmp_path: Path) -> None:
     assert checks["storage"]["status"] == "ok"
     assert checks["config:NAZAR_SECRET_KEY"]["status"] == "not_configured"
     assert checks["accounts"]["status"] == "not_configured"
-    assert checks["worker"]["status"] == "not_implemented"
+    assert checks["worker"]["status"] == "not_configured"  # no worker has polled
 
 
 def test_ready_when_configured_never_echoes_secret_values(tmp_path: Path) -> None:

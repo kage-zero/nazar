@@ -1,14 +1,19 @@
+import { useEffect } from 'react';
 import { useApiStatus } from './api/useApiStatus';
+import { useJob } from './api/useJob';
 import { useMissions } from './api/useMissions';
 import { useSession } from './api/useSession';
 import { AuthCard } from './components/AuthCard';
 import { Header } from './components/Header';
+import { JobPanel } from './components/JobPanel';
 import { MissionPanel } from './components/MissionPanel';
 import { PipelinePlan } from './components/PipelinePlan';
 import { PreflightPanel } from './components/PreflightPanel';
 import { ReadinessPanel } from './components/ReadinessPanel';
 import { Card } from './components/ui';
 import { Viewport } from './components/Viewport';
+import { displayCloud } from './lib/jobState';
+import { useViewerStore } from './state/viewerStore';
 
 export function App() {
   const status = useApiStatus();
@@ -16,6 +21,15 @@ export function App() {
   const { session, signedIn, signOut } = useSession(reachable);
   const missions = useMissions(session.state === 'signed-in');
   const readyVideo = missions.selected?.video?.status === 'ready' ? missions.selected.video : null;
+  const signedInMission = session.state === 'signed-in' ? (missions.selected?.id ?? null) : null;
+  const job = useJob(signedInMission);
+  const setLayers = useViewerStore((s) => s.setLayers);
+  const cloud = displayCloud(job.job);
+  const path = job.job?.artifacts.find((a) => a.kind === 'camera_trajectory') ?? null;
+
+  useEffect(() => {
+    setLayers(cloud, path);
+  }, [cloud, path, setLayers]);
 
   return (
     <>
@@ -68,6 +82,18 @@ export function App() {
                 </p>
               </Card>
             )}
+            {signedInMission && (
+              <JobPanel
+                job={job.job}
+                loaded={job.loaded}
+                canStart={readyVideo !== null}
+                stream={job.stream}
+                error={job.error}
+                onStart={job.start}
+                onCancel={job.cancel}
+                onRetry={job.retry}
+              />
+            )}
             <ReadinessPanel status={status} />
           </div>
           <Viewport />
@@ -75,7 +101,7 @@ export function App() {
 
         {readyVideo && <PreflightPanel key={readyVideo.id} assetId={readyVideo.id} />}
 
-        <PipelinePlan />
+        <PipelinePlan job={job.job} />
       </main>
       <footer className="inverted bg-carbon text-smoke">
         <div className="mx-auto flex max-w-page flex-wrap justify-between gap-4 px-4 py-8 sm:px-6">

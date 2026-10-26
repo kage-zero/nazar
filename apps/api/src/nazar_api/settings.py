@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     gpu_max_concurrent_jobs: int = Field(default=1, ge=1)
     upload_chunk_max_mb: int = Field(default=16, gt=0)
     session_days: int = Field(default=7, gt=0)
+    worker_lease_seconds: int = Field(default=60, ge=5)
+    max_artifact_mb: int = Field(default=1024, gt=0)
 
     secret_key: SecretStr | None = None
     worker_token: SecretStr | None = None

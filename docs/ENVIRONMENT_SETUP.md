@@ -9,6 +9,7 @@ pnpm install                 # JS deps (workspace)
 uv sync --all-packages       # Python deps (api, worker, contracts) into .venv
 pnpm env:init                # creates .env from .env.example and generates the two machine secrets
 pnpm dev                     # web on :5173 (proxies /api) + API on :8000
+pnpm worker                  # second terminal: polls the API for jobs (test pipeline only for now)
 # then open http://127.0.0.1:5173 and create the operator account (first run only)
 ```
 

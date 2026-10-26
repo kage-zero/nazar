@@ -65,6 +65,16 @@ It contains no paths or storage credentials.
 4. **Validation.** On the last chunk the API hashes the file (SHA-256), marks it `validating` and queues it on a single background thread: ffprobe → full decode at 320 px → per-frame sharpness, exposure, change, motion and viewpoint signature → keyframe selection → full-resolution and thumbnail JPEGs → `preflight.json` (atomic writes). Progress is written to the asset row, which the web app polls. Cancel is `DELETE`: the job stops at its next checkpoint and removes its files. Assets left `validating` by a restart are re-queued on startup. Undecodable files end `rejected` with a user-safe reason.
 5. This in-process executor is CPU-only. GPU stages will run in the pull-based worker (ADR-0003).
 
+## Jobs, events and the worker (Milestone 4)
+
+1. **Job.** `POST /api/missions/{id}/jobs {pipeline}` needs a `ready` video and no active job. It writes `job.created` and `job.queued`. Only one attempt runs at a time; retry is allowed after cancel, or after a retryable failure.
+2. **Event log.** `job_events` is append-only. `seq` comes from an atomic `UPDATE jobs SET last_seq = last_seq + 1 … RETURNING`, and each event has a unique per-job idempotency key (worker keys are prefixed with the attempt). Job status and the stage table are *derived* from events by one state machine (`nazar_api.jobs`), so a replay always rebuilds the same snapshot.
+3. **Worker protocol (ADR-0003).** Workers pull work: `POST /api/worker/lease` with the bearer `NAZAR_WORKER_TOKEN`; then heartbeat, event batches, input downloads and artifact uploads, all carrying `X-Nazar-Lease`. A lost lease returns 409 and the worker drops the job. A sweeper re-queues expired leases with `attempt + 1`, or finishes a pending cancellation.
+4. **Artifacts.** The worker declares a manifest (size, SHA-256, frame, bounds, provenance), then PUTs the bytes. The API verifies size and hash before an atomic rename, then emits `artifact.available` (plus `preview.updated` for point clouds). `job.completed` lists the final artifacts and is only accepted when every declared artifact is uploaded.
+5. **Browser.** `GET /api/jobs/{id}` gives the snapshot; `WS /api/jobs/{id}/stream?after=N` streams events after the cursor (origin- and cookie-checked) and closes with 1000 after the terminal event. On any other close the client catches up over `GET /api/jobs/{id}/events?after=N` and reconnects with backoff. The client reducer mirrors the server's state machine and reloads the snapshot on a gap.
+6. **Viewer.** The newest point cloud (final over preview) is fetched as binary PLY and swapped in place. Superseded requests are aborted, the old GPU buffer is disposed, and the camera fits only on a job's first cloud or on **Fit**.
+7. **Test pipeline.** `--modes test` runs real plumbing with a fixed synthetic scene (labelled in the PLY header, provenance, warnings and UI). The `standard` pipeline fails honestly with "no implementation" until Milestone 3 provides geometry.
+
 ## Coordinate-frame rules (summary; details arrive with Milestone 3)
 
 - Video-only output is `local_reconstruction`, with `scale_status` `unknown` or `relative`. Nothing is called metric or georeferenced without evidence.

@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -5,19 +7,20 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from nazar_api import __version__
 from nazar_api.db import get_engine
 from nazar_api.deps import SettingsDep
+from nazar_api.jobs import expire_leases
 from nazar_api.logging import configure_logging
 from nazar_api.migrate import upgrade_to_head
 from nazar_api.models import User
 from nazar_api.processing import AssetProcessor
 from nazar_api.readiness import check_readiness
-from nazar_api.routes import auth, missions
+from nazar_api.routes import auth, jobs, missions, worker
 from nazar_api.security import CSRF_HEADER, LoginThrottle, hash_password
 from nazar_api.settings import Settings, get_settings
 from nazar_contracts import HealthResponse, ReadinessResponse
@@ -65,6 +68,22 @@ def _bootstrap_admin(settings: Settings, session: Session) -> None:
     log.info("bootstrap operator account created")
 
 
+async def _sweep_leases(engine: Engine, lease_seconds: int) -> None:
+    """Re-queue jobs whose worker vanished even when no other request arrives."""
+    interval = max(1.0, lease_seconds / 4)
+
+    def sweep() -> None:
+        with Session(engine) as db:
+            expire_leases(db)
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(sweep)
+        except Exception:
+            log.exception("lease sweep failed")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
@@ -79,7 +98,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resumed = processor.resume_pending()
         if resumed:
             log.info("resumed pending validations", extra={"count": resumed})
+        sweeper = asyncio.create_task(_sweep_leases(engine, settings.worker_lease_seconds))
         yield
+        sweeper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeper
         processor.shutdown()
 
     app = FastAPI(
@@ -92,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.processor = processor
     app.state.login_throttle = LoginThrottle()
+    app.state.worker_seen_at = None
     app.dependency_overrides[get_settings] = lambda: settings
     app.add_middleware(RequireRequestHeader)
     app.add_middleware(
@@ -103,6 +127,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(auth.router)
     app.include_router(missions.router)
+    app.include_router(jobs.router)
+    app.include_router(worker.router)
 
     @app.get("/api/health", response_model=HealthResponse, tags=["system"])
     def health(s: SettingsDep) -> HealthResponse:
@@ -118,6 +144,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/ready", response_model=ReadinessResponse, tags=["system"])
     def ready(s: SettingsDep) -> ReadinessResponse:
         """Readiness: database, storage, required configuration, accounts, worker, GPU."""
-        return check_readiness(s)
+        return check_readiness(s, app.state.worker_seen_at)
 
     return app

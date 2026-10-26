@@ -3,11 +3,24 @@ import { useCallback, useEffect, useState } from 'react';
 import { missions as api } from './missions';
 
 const POLL_MS = 1000;
+const PARAM = 'mission';
+
+/** The selected mission lives in the URL so a reload or shared link reopens it. */
+function missionFromUrl(): string | null {
+  return new URLSearchParams(window.location.search).get(PARAM);
+}
+
+function writeMissionToUrl(id: string | null) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set(PARAM, id);
+  else url.searchParams.delete(PARAM);
+  window.history.replaceState(null, '', url);
+}
 
 /** The signed-in operator's missions, the selected one, and live validation polling. */
 export function useMissions(enabled: boolean) {
   const [list, setList] = useState<Mission[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(missionFromUrl);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback((signal?: AbortSignal) => {
@@ -31,6 +44,10 @@ export function useMissions(enabled: boolean) {
       controller.abort();
     };
   }, [enabled, load]);
+
+  useEffect(() => {
+    if (enabled && list) writeMissionToUrl(selectedId);
+  }, [enabled, list, selectedId]);
 
   const visible = enabled ? list : null;
   const selected = visible?.find((m) => m.id === selectedId) ?? null;

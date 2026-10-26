@@ -35,3 +35,7 @@ def sha256_file(path: Path, block: int = 1 << 20) -> str:
         while chunk := fh.read(block):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def artifact_path(settings: Settings, job_id: str, artifact_id: str) -> Path:
+    return settings.storage_path / "jobs" / job_id / "artifacts" / artifact_id

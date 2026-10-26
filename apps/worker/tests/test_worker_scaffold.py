@@ -31,6 +31,9 @@ def test_doctor_reports_disk_without_running_gpu_work(tmp_path: Path) -> None:
     assert "gpus" in report
 
 
-def test_run_is_honest_about_missing_job_loop(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["run"]) == 2
-    assert "not implemented" in capsys.readouterr().err
+def test_run_refuses_without_a_worker_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("NAZAR_WORKER_TOKEN", raising=False)
+    assert main(["run", "--env-file", str(tmp_path / "missing.env")]) == 2
+    assert "NAZAR_WORKER_TOKEN is not set" in capsys.readouterr().err

@@ -4,15 +4,18 @@ Every pipeline stage is implemented by an adapter that reads declared inputs fro
 workspace and writes declared, checksummed outputs atomically. Adapters never touch the
 database or the browser; the worker loop turns their results into contract events.
 
-Stage 1 (scaffold) registers no adapters. `STAGE_PLAN` records the intended component and
+`ADAPTERS` holds the real implementations (none yet); `test_pipeline.build_test_pipeline` builds the
+deterministic test pipeline used by CI and demos. `STAGE_PLAN` records the intended component and
 the milestone that delivers each one so the UI and docs can state status honestly.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
+from typing import Any, Literal, Protocol
 
-from nazar_contracts import ArtifactManifest, StageName
+from nazar_contracts import ArtifactCreate, ArtifactCreated, StageName, WorkerLease
+
+WarningSeverity = Literal["info", "warning", "critical"]
 
 
 @dataclass(frozen=True)
@@ -36,19 +39,32 @@ STAGE_PLAN: tuple[StagePlan, ...] = (
 )
 
 
+class Cancelled(Exception):
+    """Raised inside a stage when the user asked to cancel; the runner reports it."""
+
+
 @dataclass(frozen=True)
 class StageContext:
-    job_id: str
-    workspace: Path
-    test_pipeline: bool
+    """What an adapter may do. It never talks to the API or the database directly."""
+
+    lease: WorkerLease
+    progress: Callable[[str, int | None, int | None, str | None], None]
+    warn: Callable[[str, str, WarningSeverity], None]
+    publish: Callable[[ArtifactCreate, bytes], ArtifactCreated]
+    preflight: Callable[[], dict[str, Any]]
+    check_cancel: Callable[[], None]
 
 
 class StageAdapter(Protocol):
-    stage: StageName
+    def skip_reason(self, lease: WorkerLease) -> str | None:
+        """Why this stage cannot meaningfully run on this job's inputs, or None to run it.
+        Asked before the stage starts: a started stage is never reported as skipped."""
+        ...
 
-    def run(self, ctx: StageContext) -> list[ArtifactManifest]:
-        """Run the stage. Raise to fail it; return manifests of artifacts written."""
+    def run(self, ctx: StageContext) -> None:
+        """Run the stage. Raise to fail the job."""
         ...
 
 
+# Real stage implementations, keyed by stage. Empty until Milestone 3 lands geometry.
 ADAPTERS: dict[StageName, StageAdapter] = {}

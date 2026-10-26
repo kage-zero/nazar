@@ -80,8 +80,7 @@ export function PreflightPanel({ assetId }: { assetId: string }) {
       </div>
       <p className="mt-2 text-slate">
         Measured on the server by decoding all {analysis.frames_decoded} frames in{' '}
-        {analysis.processing_s.toFixed(1)} s. No reconstruction has run yet; that needs the GPU
-        worker.
+        {analysis.processing_s.toFixed(1)} s.
       </p>
 
       <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">

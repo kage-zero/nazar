@@ -90,3 +90,14 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+@keyframes nazar-pop {
+  0% {
+    opacity: 0.4;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}

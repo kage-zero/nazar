@@ -52,7 +52,8 @@ _STAGE_STATUSES: tuple[JobStatus, ...] = tuple(JobStatus(stage.value) for stage 
 
 def _build_transitions() -> dict[JobStatus, frozenset[JobStatus]]:
     t: dict[JobStatus, set[JobStatus]] = {
-        JobStatus.CREATED: {JobStatus.VALIDATING},
+        # Inputs are validated at upload, so a new job usually goes straight to the queue.
+        JobStatus.CREATED: {JobStatus.VALIDATING, JobStatus.QUEUED},
         JobStatus.VALIDATING: {JobStatus.QUEUED},
         JobStatus.QUEUED: {_STAGE_STATUSES[0]},
         JobStatus.CANCEL_REQUESTED: {JobStatus.CANCELLED, JobStatus.FAILED},
@@ -64,6 +65,8 @@ def _build_transitions() -> dict[JobStatus, frozenset[JobStatus]]:
     for i, status in enumerate(_STAGE_STATUSES):
         # Any later stage is reachable: intermediate stages were skipped (with a reason).
         t[status] = set(_STAGE_STATUSES[i + 1 :])
+        # A worker that stops renewing its lease hands the job back to the queue.
+        t[status].add(JobStatus.QUEUED)
     t[_STAGE_STATUSES[-1]].add(JobStatus.COMPLETED)
 
     for status, targets in t.items():

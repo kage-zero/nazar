@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from pydantic import SecretStr
 from sqlalchemy import func, select, text
@@ -97,23 +98,42 @@ def _accounts(settings: Settings) -> ReadinessCheck:
     )
 
 
-def check_readiness(settings: Settings) -> ReadinessResponse:
+WORKER_FRESH_S = 60
+
+
+def _worker(seen_at: datetime | None) -> ReadinessCheck:
+    if seen_at is not None:
+        age = (datetime.now(UTC) - seen_at).total_seconds()
+        if age <= WORKER_FRESH_S:
+            return ReadinessCheck(
+                name="worker",
+                status=CheckStatus.OK,
+                detail=f"A worker contacted the API {age:.0f} s ago.",
+                required=False,
+            )
+    return ReadinessCheck(
+        name="worker",
+        status=CheckStatus.NOT_CONFIGURED,
+        detail="No worker has contacted the API in the last minute. Jobs wait in the queue "
+        "until one does (locally: `pnpm worker`).",
+        required=False,
+    )
+
+
+def check_readiness(
+    settings: Settings, worker_seen_at: datetime | None = None
+) -> ReadinessResponse:
     checks = [
         _database(settings),
         _storage(settings),
         _secret("NAZAR_SECRET_KEY", settings.secret_key, "Signs artifact links and sessions"),
         _secret("NAZAR_WORKER_TOKEN", settings.worker_token, "Authenticates the GPU worker"),
         _accounts(settings),
-        ReadinessCheck(
-            name="worker",
-            status=CheckStatus.NOT_IMPLEMENTED,
-            detail="Job queue and worker heartbeat arrive in Milestone 4.",
-            required=False,
-        ),
+        _worker(worker_seen_at),
         ReadinessCheck(
             name="gpu",
             status=CheckStatus.NOT_IMPLEMENTED,
-            detail="GPU readiness is reported by the worker heartbeat (Milestone 1/4).",
+            detail="Workers do not report GPU details yet (needs Milestone 1 on the VDI).",
             required=False,
         ),
     ]

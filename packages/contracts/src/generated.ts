@@ -44,6 +44,7 @@ export type AssetStatus =
  */
 export type EventType =
   | 'job.created'
+  | 'job.queued'
   | 'stage.started'
   | 'stage.progress'
   | 'stage.completed'
@@ -55,19 +56,17 @@ export type EventType =
   | 'job.failed'
   | 'cancel.requested'
   | 'job.cancelled';
-export type JobEvent =
-  | JobCreated
-  | StageStarted
-  | StageProgress
-  | StageCompleted
-  | StageSkipped
-  | WarningRaised
-  | ArtifactAvailable
-  | PreviewUpdated
-  | JobCompleted
-  | JobFailed
-  | CancelRequested
-  | JobCancelled;
+/**
+ * Which stage implementations a job uses.
+ *
+ * - `test`: deterministic test pipeline. Emits small real-format fixture artifacts through
+ *   the real API and event contracts. Never presented as a reconstruction of the input.
+ * - `standard`: real stages (CPU classical geometry today; GPU models when integrated).
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "PipelineMode".
+ */
+export type PipelineMode = 'test' | 'standard';
 /**
  * Processing stages. Each value is also the job status while that stage runs.
  *
@@ -84,6 +83,12 @@ export type StageName =
   | 'surface_processing'
   | 'analysis'
   | 'exporting';
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "StageRunState".
+ */
+export type StageRunState =
+  'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'cancelled';
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "JobStatus".
@@ -105,6 +110,20 @@ export type JobStatus =
   | 'failed'
   | 'cancel_requested'
   | 'cancelled';
+export type JobEvent =
+  | JobCreated
+  | JobQueued
+  | StageStarted
+  | StageProgress
+  | StageCompleted
+  | StageSkipped
+  | WarningRaised
+  | ArtifactAvailable
+  | PreviewUpdated
+  | JobCompleted
+  | JobFailed
+  | CancelRequested
+  | JobCancelled;
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "KeyframeReason".
@@ -130,6 +149,8 @@ export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' |
  * Bundle that pulls every public contract into one schema document.
  */
 export interface NazarContracts {
+  artifact_create: ArtifactCreate;
+  artifact_created: ArtifactCreated;
   artifact_manifest: ArtifactManifest;
   asset: Asset;
   asset_create: AssetCreate;
@@ -137,6 +158,7 @@ export interface NazarContracts {
   credentials: Credentials;
   event_type: EventType;
   health: HealthResponse;
+  job: Job;
   job_event: JobEvent;
   job_status: JobStatus;
   mission: Mission;
@@ -144,32 +166,37 @@ export interface NazarContracts {
   preflight_report: PreflightReport;
   readiness: ReadinessResponse;
   stage_name: StageName;
+  worker_event_ack: WorkerEventAck;
+  worker_event_batch: WorkerEventBatch;
+  worker_heartbeat: WorkerHeartbeat;
+  worker_lease: WorkerLease;
+  worker_lease_request: WorkerLeaseRequest;
 }
 /**
+ * Declared before upload; bytes are verified against `byte_size` and the checksum.
+ *
  * This interface was referenced by `NazarContracts`'s JSON-Schema
- * via the `definition` "ArtifactManifest".
+ * via the `definition` "ArtifactCreate".
  */
-export interface ArtifactManifest {
+export interface ArtifactCreate {
   bounds?: Bounds3D | null;
   byte_size: number;
   checksum_sha256: string;
-  created_at: string;
+  /**
+   * False for previews that a later revision may supersede.
+   */
+  final?: boolean;
   frame?: CoordinateFrame | null;
-  id: string;
-  job_id: string;
+  /**
+   * Idempotency key.
+   */
+  key: string;
   kind: ArtifactKind;
   lod?: number | null;
   media_type: string;
   point_count?: number | null;
   provenance: Provenance;
-  /**
-   * Monotonic per (job, kind); stale revisions are ignored.
-   */
-  revision: number;
   source_frames?: FrameRange | null;
-  /**
-   * Column-major 4x4 from artifact-local coords to `frame`.
-   */
   transform_to_frame?:
     | [
         number,
@@ -256,6 +283,64 @@ export interface FrameRange {
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "ArtifactCreated".
+ */
+export interface ArtifactCreated {
+  id: string;
+  revision: number;
+  /**
+   * True when the bytes were already received (retry).
+   */
+  uploaded: boolean;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "ArtifactManifest".
+ */
+export interface ArtifactManifest {
+  bounds?: Bounds3D | null;
+  byte_size: number;
+  checksum_sha256: string;
+  created_at: string;
+  frame?: CoordinateFrame | null;
+  id: string;
+  job_id: string;
+  kind: ArtifactKind;
+  lod?: number | null;
+  media_type: string;
+  point_count?: number | null;
+  provenance: Provenance;
+  /**
+   * Monotonic per (job, kind); stale revisions are ignored.
+   */
+  revision: number;
+  source_frames?: FrameRange | null;
+  /**
+   * Column-major 4x4 from artifact-local coords to `frame`.
+   */
+  transform_to_frame?:
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | null;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "Asset".
  */
 export interface Asset {
@@ -330,6 +415,75 @@ export interface HealthResponse {
   version: string;
 }
 /**
+ * Current snapshot of a job, rebuilt from its event log.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "Job".
+ */
+export interface Job {
+  /**
+   * Newest revision of each artifact.
+   */
+  artifacts: ArtifactManifest[];
+  attempt: number;
+  created_at: string;
+  error?: string | null;
+  id: string;
+  /**
+   * Cursor of the newest event; resume after it.
+   */
+  last_seq: number;
+  mission_id: string;
+  pipeline: PipelineMode;
+  retryable?: boolean;
+  stages: StageState[];
+  status: JobStatus;
+  updated_at: string;
+  warnings: WarningData[];
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "StageState".
+ */
+export interface StageState {
+  duration_s?: number | null;
+  progress?: StageProgressData | null;
+  /**
+   * Why it was skipped or failed.
+   */
+  reason?: string | null;
+  stage: StageName;
+  state: StageRunState;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "StageProgressData".
+ */
+export interface StageProgressData {
+  /**
+   * Units of real work done. Null when not measurable.
+   */
+  completed?: number | null;
+  message: string;
+  /**
+   * Total units. Null means indeterminate progress.
+   */
+  total?: number | null;
+  /**
+   * e.g. 'frames', 'keyframes', 'iterations'
+   */
+  unit?: string | null;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WarningData".
+ */
+export interface WarningData {
+  code: string;
+  message: string;
+  severity: 'info' | 'warning' | 'critical';
+}
+/**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "JobCreated".
  */
@@ -350,6 +504,33 @@ export interface JobCreated {
 export interface JobCreatedData {
   mission_id: string;
   test_pipeline: boolean;
+}
+/**
+ * The job went back to the queue (user retry, or a worker stopped renewing its lease).
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "JobQueued".
+ */
+export interface JobQueued {
+  data: JobQueuedData;
+  job_id: string;
+  schema_version?: 1;
+  seq: number;
+  stage?: StageName | null;
+  status: JobStatus;
+  ts: string;
+  type: 'job.queued';
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "JobQueuedData".
+ */
+export interface JobQueuedData {
+  attempt: number;
+  /**
+   * Why the job (re)entered the queue, e.g. retry or lost worker.
+   */
+  reason: string;
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -377,25 +558,6 @@ export interface StageProgress {
   status: JobStatus;
   ts: string;
   type: 'stage.progress';
-}
-/**
- * This interface was referenced by `NazarContracts`'s JSON-Schema
- * via the `definition` "StageProgressData".
- */
-export interface StageProgressData {
-  /**
-   * Units of real work done. Null when not measurable.
-   */
-  completed?: number | null;
-  message: string;
-  /**
-   * Total units. Null means indeterminate progress.
-   */
-  total?: number | null;
-  /**
-   * e.g. 'frames', 'keyframes', 'iterations'
-   */
-  unit?: string | null;
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -452,15 +614,6 @@ export interface WarningRaised {
   status: JobStatus;
   ts: string;
   type: 'warning';
-}
-/**
- * This interface was referenced by `NazarContracts`'s JSON-Schema
- * via the `definition` "WarningData".
- */
-export interface WarningData {
-  code: string;
-  message: string;
-  severity: 'info' | 'warning' | 'critical';
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -714,4 +867,78 @@ export interface ReadinessCheck {
   name: string;
   required: boolean;
   status: CheckStatus;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerEventAck".
+ */
+export interface WorkerEventAck {
+  cancel_requested: boolean;
+  last_seq: number;
+  status: JobStatus;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerEventBatch".
+ */
+export interface WorkerEventBatch {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  events: [WorkerEvent, ...WorkerEvent[]];
+}
+/**
+ * An event reported by the worker. The API assigns `seq`, `ts` and `status`.
+ *
+ * `key` makes delivery idempotent: re-sending an event with a key the job already has is a
+ * no-op, so the worker can safely retry after a dropped connection.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerEvent".
+ */
+export interface WorkerEvent {
+  data?: {
+    [k: string]: unknown;
+  } | null;
+  key: string;
+  stage?: StageName | null;
+  type: EventType;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerHeartbeat".
+ */
+export interface WorkerHeartbeat {
+  cancel_requested: boolean;
+  lease_expires_at: string;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerLease".
+ */
+export interface WorkerLease {
+  attempt: number;
+  job_id: string;
+  keyframe_count: number;
+  lease_expires_at: string;
+  /**
+   * Send as `X-Nazar-Lease` on every call for this job.
+   */
+  lease_id: string;
+  mission_id: string;
+  pipeline: PipelineMode;
+  video_asset_id: string;
+  video_sha256: string;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerLeaseRequest".
+ */
+export interface WorkerLeaseRequest {
+  /**
+   * @minItems 1
+   */
+  modes: [PipelineMode, ...PipelineMode[]];
+  worker_id: string;
 }

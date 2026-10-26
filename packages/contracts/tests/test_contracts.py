@@ -60,3 +60,9 @@ def test_event_rejects_unknown_fields_and_bad_seq() -> None:
         events.validate_python({**base, "seq": 0})
     with pytest.raises(ValidationError):
         events.validate_python({**base, "seq": 1, "percent": 50})
+
+
+def test_lost_lease_requeues_but_queue_cannot_complete() -> None:
+    assert can_transition(JobStatus.CREATED, JobStatus.QUEUED)
+    assert can_transition(JobStatus.GEOMETRY, JobStatus.QUEUED)
+    assert not can_transition(JobStatus.COMPLETED, JobStatus.QUEUED)

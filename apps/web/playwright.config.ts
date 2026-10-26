@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { OPERATOR_STATE } from './e2e/operator';
 
 const REPO_ROOT = '../..';
@@ -7,9 +8,12 @@ const WEB_PORT = 5174;
 // One storage dir per run so first-run setup always starts from an empty database.
 // Set here, in the main process, so every worker inherits the same value.
 process.env.NAZAR_E2E_RUN ??= String(Date.now());
+// Random per run, shared only by the E2E API and the E2E worker. Never written to disk.
+process.env.NAZAR_E2E_WORKER_TOKEN ??= randomBytes(24).toString('hex');
 
 /**
- * Fast deterministic E2E profile: real FastAPI + real Vite dev server, no GPU, no weights.
+ * Fast deterministic E2E profile: real FastAPI + real worker (test pipeline) + real Vite dev
+ * server. No GPU, no weights.
  * The API runs with an isolated storage dir and secrets forced blank so readiness is
  * deterministic regardless of what the developer has put in their local .env.
  */
@@ -62,10 +66,23 @@ export default defineConfig({
         NAZAR_WEB_ORIGINS: `http://127.0.0.1:${WEB_PORT}`,
         NAZAR_DATABASE_URL: '',
         NAZAR_SECRET_KEY: '',
-        NAZAR_WORKER_TOKEN: '',
+        NAZAR_WORKER_TOKEN: process.env.NAZAR_E2E_WORKER_TOKEN,
+        NAZAR_WORKER_LEASE_SECONDS: '15',
         NAZAR_BOOTSTRAP_ADMIN_EMAIL: '',
         NAZAR_BOOTSTRAP_ADMIN_PASSWORD: '',
       },
+    },
+    {
+      // The real worker process in test-pipeline mode, paced so stage transitions and
+      // preview revisions are observable in the browser.
+      command:
+        `uv run --package nazar-worker nazar-worker run --api http://127.0.0.1:${API_PORT} ` +
+        '--modes test --step-delay 0.8 --poll 0.5 --heartbeat 4 --env-file __none__',
+      cwd: REPO_ROOT,
+      wait: { stderr: /polling for test jobs/ },
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: { NAZAR_WORKER_TOKEN: process.env.NAZAR_E2E_WORKER_TOKEN },
     },
     {
       command: `pnpm exec vite --port ${WEB_PORT} --strictPort --host 127.0.0.1`,

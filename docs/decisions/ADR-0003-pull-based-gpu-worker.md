@@ -1,6 +1,6 @@
 # ADR-0003: GPU worker pulls jobs from the API over outbound HTTPS
 
-- **Status:** Accepted for implementation in Milestone 4 (2026-10-26). Needs verification on the college VDI in Milestone 1.
+- **Status:** Accepted; protocol implemented in Milestone 4 (2026-10-27) and exercised locally by the test pipeline. Still needs verification on the college VDI (Milestone 1) and a choice between online and bundle mode.
 
 ## Context
 

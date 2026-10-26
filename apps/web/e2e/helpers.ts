@@ -25,6 +25,13 @@ export async function createMission(page: Page, label: string): Promise<string> 
   return name;
 }
 
+/** Uploads the sample video to the selected mission and waits for validation to finish. */
+export async function uploadSample(page: Page): Promise<void> {
+  await page.getByTestId('video-input').setInputFiles(SAMPLE_VIDEO);
+  await page.getByRole('button', { name: 'Upload & validate' }).click();
+  await expect(page.getByTestId('video-ready')).toBeVisible({ timeout: 90_000 });
+}
+
 let counter = 0;
 function test_id() {
   counter += 1;

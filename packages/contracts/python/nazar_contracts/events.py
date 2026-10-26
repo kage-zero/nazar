@@ -19,6 +19,7 @@ EVENT_SCHEMA_VERSION: Literal[1] = 1
 
 class EventType(StrEnum):
     JOB_CREATED = "job.created"
+    JOB_QUEUED = "job.queued"
     STAGE_STARTED = "stage.started"
     STAGE_PROGRESS = "stage.progress"
     STAGE_COMPLETED = "stage.completed"
@@ -51,6 +52,18 @@ class JobCreatedData(BaseModel):
 class JobCreated(_Event):
     type: Literal[EventType.JOB_CREATED]
     data: JobCreatedData
+
+
+class JobQueuedData(BaseModel):
+    attempt: int = Field(ge=1)
+    reason: str = Field(description="Why the job (re)entered the queue, e.g. retry or lost worker.")
+
+
+class JobQueued(_Event):
+    """The job went back to the queue (user retry, or a worker stopped renewing its lease)."""
+
+    type: Literal[EventType.JOB_QUEUED]
+    data: JobQueuedData
 
 
 class StageStarted(_Event):
@@ -146,6 +159,7 @@ class JobCancelled(_Event):
 
 JobEvent = Annotated[
     JobCreated
+    | JobQueued
     | StageStarted
     | StageProgress
     | StageCompleted

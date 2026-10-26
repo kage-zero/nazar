@@ -15,6 +15,8 @@ from nazar_contracts import (
     EVENT_SCHEMA_VERSION,
     PIPELINE_STAGES,
     TERMINAL_STATUSES,
+    ArtifactCreate,
+    ArtifactCreated,
     ArtifactManifest,
     Asset,
     AssetCreate,
@@ -22,6 +24,7 @@ from nazar_contracts import (
     Credentials,
     EventType,
     HealthResponse,
+    Job,
     JobEvent,
     JobStatus,
     Mission,
@@ -29,6 +32,11 @@ from nazar_contracts import (
     PreflightReport,
     ReadinessResponse,
     StageName,
+    WorkerEventAck,
+    WorkerEventBatch,
+    WorkerHeartbeat,
+    WorkerLease,
+    WorkerLeaseRequest,
 )
 from nazar_contracts.jobs import ALLOWED_TRANSITIONS
 
@@ -52,6 +60,14 @@ class NazarContracts(BaseModel):
     asset: Asset
     asset_create: AssetCreate
     preflight_report: PreflightReport
+    job: Job
+    artifact_create: ArtifactCreate
+    artifact_created: ArtifactCreated
+    worker_lease_request: WorkerLeaseRequest
+    worker_lease: WorkerLease
+    worker_heartbeat: WorkerHeartbeat
+    worker_event_batch: WorkerEventBatch
+    worker_event_ack: WorkerEventAck
 
 
 def _strip_property_titles(schema: dict[str, Any]) -> None:

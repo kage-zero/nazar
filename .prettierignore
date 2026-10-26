@@ -10,3 +10,4 @@ docs/*.pdf
 docs/sample/
 packages/contracts/src/generated.ts
 packages/contracts/schema/
+**/playwright/.auth/

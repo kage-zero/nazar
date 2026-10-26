@@ -88,6 +88,146 @@
       "title": "ArtifactAvailable",
       "type": "object"
     },
+    "ArtifactCreate": {
+      "additionalProperties": false,
+      "description": "Declared before upload; bytes are verified against `byte_size` and the checksum.",
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bounds3D"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "byte_size": {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        "checksum_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "final": {
+          "default": false,
+          "description": "False for previews that a later revision may supersede.",
+          "type": "boolean"
+        },
+        "frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoordinateFrame"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "key": {
+          "description": "Idempotency key.",
+          "maxLength": 96,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ArtifactKind"
+        },
+        "lod": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "media_type": {
+          "maxLength": 100,
+          "type": "string"
+        },
+        "point_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "source_frames": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "transform_to_frame": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 16,
+              "minItems": 16,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "media_type",
+        "byte_size",
+        "checksum_sha256",
+        "provenance"
+      ],
+      "title": "ArtifactCreate",
+      "type": "object"
+    },
+    "ArtifactCreated": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "uploaded": {
+          "description": "True when the bytes were already received (retry).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "uploaded"
+      ],
+      "title": "ArtifactCreated",
+      "type": "object"
+    },
     "ArtifactKind": {
       "enum": [
         "keyframes",
@@ -536,6 +676,7 @@
     "EventType": {
       "enum": [
         "job.created",
+        "job.queued",
         "stage.started",
         "stage.progress",
         "stage.completed",
@@ -685,6 +826,90 @@
         "time"
       ],
       "title": "HealthResponse",
+      "type": "object"
+    },
+    "Job": {
+      "additionalProperties": false,
+      "description": "Current snapshot of a job, rebuilt from its event log.",
+      "properties": {
+        "artifacts": {
+          "description": "Newest revision of each artifact.",
+          "items": {
+            "$ref": "#/$defs/ArtifactManifest"
+          },
+          "type": "array"
+        },
+        "attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_seq": {
+          "description": "Cursor of the newest event; resume after it.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "pipeline": {
+          "$ref": "#/$defs/PipelineMode"
+        },
+        "retryable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/StageState"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/WarningData"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "status",
+        "pipeline",
+        "attempt",
+        "last_seq",
+        "stages",
+        "artifacts",
+        "warnings",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "Job",
       "type": "object"
     },
     "JobCancelled": {
@@ -939,6 +1164,77 @@
       "title": "JobFailedData",
       "type": "object"
     },
+    "JobQueued": {
+      "additionalProperties": false,
+      "description": "The job went back to the queue (user retry, or a worker stopped renewing its lease).",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JobQueuedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "job.queued",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "JobQueued",
+      "type": "object"
+    },
+    "JobQueuedData": {
+      "properties": {
+        "attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the job (re)entered the queue, e.g. retry or lost worker.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt",
+        "reason"
+      ],
+      "title": "JobQueuedData",
+      "type": "object"
+    },
     "JobStatus": {
       "enum": [
         "created",
@@ -1045,6 +1341,15 @@
       ],
       "title": "MissionCreate",
       "type": "object"
+    },
+    "PipelineMode": {
+      "description": "Which stage implementations a job uses.\n\n- `test`: deterministic test pipeline. Emits small real-format fixture artifacts through\n  the real API and event contracts. Never presented as a reconstruction of the input.\n- `standard`: real stages (CPU classical geometry today; GPU models when integrated).",
+      "enum": [
+        "test",
+        "standard"
+      ],
+      "title": "PipelineMode",
+      "type": "string"
     },
     "PreflightReport": {
       "properties": {
@@ -1571,6 +1876,18 @@
       "title": "StageProgressData",
       "type": "object"
     },
+    "StageRunState": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "skipped",
+        "failed",
+        "cancelled"
+      ],
+      "title": "StageRunState",
+      "type": "string"
+    },
     "StageSkipped": {
       "additionalProperties": false,
       "properties": {
@@ -1681,6 +1998,57 @@
         "type"
       ],
       "title": "StageStarted",
+      "type": "object"
+    },
+    "StageState": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageProgressData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it was skipped or failed."
+        },
+        "stage": {
+          "$ref": "#/$defs/StageName"
+        },
+        "state": {
+          "$ref": "#/$defs/StageRunState"
+        }
+      },
+      "required": [
+        "stage",
+        "state"
+      ],
+      "title": "StageState",
       "type": "object"
     },
     "UserPublic": {
@@ -1888,10 +2256,188 @@
       ],
       "title": "WarningSeverity",
       "type": "string"
+    },
+    "WorkerEvent": {
+      "additionalProperties": false,
+      "description": "An event reported by the worker. The API assigns `seq`, `ts` and `status`.\n\n`key` makes delivery idempotent: re-sending an event with a key the job already has is a\nno-op, so the worker can safely retry after a dropped connection.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "key": {
+          "maxLength": 96,
+          "minLength": 1,
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "$ref": "#/$defs/EventType"
+        }
+      },
+      "required": [
+        "key",
+        "type"
+      ],
+      "title": "WorkerEvent",
+      "type": "object"
+    },
+    "WorkerEventAck": {
+      "additionalProperties": false,
+      "properties": {
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "last_seq": {
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        }
+      },
+      "required": [
+        "status",
+        "last_seq",
+        "cancel_requested"
+      ],
+      "title": "WorkerEventAck",
+      "type": "object"
+    },
+    "WorkerEventBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/WorkerEvent"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "events"
+      ],
+      "title": "WorkerEventBatch",
+      "type": "object"
+    },
+    "WorkerHeartbeat": {
+      "additionalProperties": false,
+      "properties": {
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "lease_expires_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cancel_requested",
+        "lease_expires_at"
+      ],
+      "title": "WorkerHeartbeat",
+      "type": "object"
+    },
+    "WorkerLease": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "keyframe_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lease_expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "lease_id": {
+          "description": "Send as `X-Nazar-Lease` on every call for this job.",
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "pipeline": {
+          "$ref": "#/$defs/PipelineMode"
+        },
+        "video_asset_id": {
+          "type": "string"
+        },
+        "video_sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id",
+        "job_id",
+        "mission_id",
+        "pipeline",
+        "attempt",
+        "lease_expires_at",
+        "video_asset_id",
+        "keyframe_count",
+        "video_sha256"
+      ],
+      "title": "WorkerLease",
+      "type": "object"
+    },
+    "WorkerLeaseRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "modes": {
+          "items": {
+            "$ref": "#/$defs/PipelineMode"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "worker_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "worker_id",
+        "modes"
+      ],
+      "title": "WorkerLeaseRequest",
+      "type": "object"
     }
   },
   "description": "Bundle that pulls every public contract into one schema document.",
   "properties": {
+    "artifact_create": {
+      "$ref": "#/$defs/ArtifactCreate"
+    },
+    "artifact_created": {
+      "$ref": "#/$defs/ArtifactCreated"
+    },
     "artifact_manifest": {
       "$ref": "#/$defs/ArtifactManifest"
     },
@@ -1913,6 +2459,9 @@
     "health": {
       "$ref": "#/$defs/HealthResponse"
     },
+    "job": {
+      "$ref": "#/$defs/Job"
+    },
     "job_event": {
       "discriminator": {
         "mapping": {
@@ -1922,6 +2471,7 @@
           "job.completed": "#/$defs/JobCompleted",
           "job.created": "#/$defs/JobCreated",
           "job.failed": "#/$defs/JobFailed",
+          "job.queued": "#/$defs/JobQueued",
           "preview.updated": "#/$defs/PreviewUpdated",
           "stage.completed": "#/$defs/StageCompleted",
           "stage.progress": "#/$defs/StageProgress",
@@ -1934,6 +2484,9 @@
       "oneOf": [
         {
           "$ref": "#/$defs/JobCreated"
+        },
+        {
+          "$ref": "#/$defs/JobQueued"
         },
         {
           "$ref": "#/$defs/StageStarted"
@@ -1988,6 +2541,21 @@
     },
     "stage_name": {
       "$ref": "#/$defs/StageName"
+    },
+    "worker_event_ack": {
+      "$ref": "#/$defs/WorkerEventAck"
+    },
+    "worker_event_batch": {
+      "$ref": "#/$defs/WorkerEventBatch"
+    },
+    "worker_heartbeat": {
+      "$ref": "#/$defs/WorkerHeartbeat"
+    },
+    "worker_lease": {
+      "$ref": "#/$defs/WorkerLease"
+    },
+    "worker_lease_request": {
+      "$ref": "#/$defs/WorkerLeaseRequest"
     }
   },
   "required": [
@@ -2004,7 +2572,15 @@
     "mission_create",
     "asset",
     "asset_create",
-    "preflight_report"
+    "preflight_report",
+    "job",
+    "artifact_create",
+    "artifact_created",
+    "worker_lease_request",
+    "worker_lease",
+    "worker_heartbeat",
+    "worker_event_batch",
+    "worker_event_ack"
   ],
   "title": "NazarContracts",
   "type": "object"

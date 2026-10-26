@@ -3,7 +3,8 @@
     "analysis": [
       "cancel_requested",
       "exporting",
-      "failed"
+      "failed",
+      "queued"
     ],
     "cancel_requested": [
       "cancelled",
@@ -16,6 +17,7 @@
     "created": [
       "cancel_requested",
       "failed",
+      "queued",
       "validating"
     ],
     "dense_reconstruction": [
@@ -23,6 +25,7 @@
       "cancel_requested",
       "exporting",
       "failed",
+      "queued",
       "surface_processing"
     ],
     "depth_priors": [
@@ -32,6 +35,7 @@
       "dynamic_analysis",
       "exporting",
       "failed",
+      "queued",
       "sensor_optimization",
       "surface_processing"
     ],
@@ -41,13 +45,15 @@
       "dense_reconstruction",
       "exporting",
       "failed",
+      "queued",
       "sensor_optimization",
       "surface_processing"
     ],
     "exporting": [
       "cancel_requested",
       "completed",
-      "failed"
+      "failed",
+      "queued"
     ],
     "failed": [
       "queued"
@@ -60,6 +66,7 @@
       "dynamic_analysis",
       "exporting",
       "failed",
+      "queued",
       "sensor_optimization",
       "surface_processing"
     ],
@@ -72,6 +79,7 @@
       "exporting",
       "failed",
       "geometry",
+      "queued",
       "sensor_optimization",
       "surface_processing"
     ],
@@ -86,13 +94,15 @@
       "dense_reconstruction",
       "exporting",
       "failed",
+      "queued",
       "surface_processing"
     ],
     "surface_processing": [
       "analysis",
       "cancel_requested",
       "exporting",
-      "failed"
+      "failed",
+      "queued"
     ],
     "validating": [
       "cancel_requested",

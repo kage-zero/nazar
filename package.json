@@ -16,6 +16,7 @@
     "contracts:generate": "turbo run contracts:generate",
     "contracts:check": "turbo run contracts:check",
     "check": "turbo run lint typecheck test contracts:check",
+    "worker": "uv run --package nazar-worker nazar-worker run --modes test --step-delay 0.8",
     "env:init": "uv run python scripts/init_env.py",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
