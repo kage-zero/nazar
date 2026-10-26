@@ -1,0 +1,57 @@
+# --- Secrets: never commit. Only the blank template .env.example is allowed. ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets/
+*.rdp
+*.vnc
+
+# --- Dependencies / build ---
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.vite/
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Tests ---
+playwright-report/
+test-results/
+blob-report/
+coverage/
+
+# --- Runtime data: mission uploads, artifacts, local DB, model weights ---
+var/
+data/
+weights/
+models/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+*.db
+*.sqlite
+*.sqlite3
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

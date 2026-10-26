@@ -1,0 +1,26 @@
+{
+  "name": "nazar",
+  "private": true,
+  "description": "Single-pass drone video to progressive 3D reconstruction",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "contracts:generate": "turbo run contracts:generate",
+    "contracts:check": "turbo run contracts:check",
+    "check": "turbo run lint typecheck test contracts:check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.10",
+    "turbo": "2.11.10"
+  }
+}

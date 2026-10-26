@@ -1,0 +1,92 @@
+/*
+ * Design tokens from docs/DESIGN.md ("Brutalist editorial showroom on warm gray").
+ * Tailwind's default palette is cleared so only design-system colours can be used.
+ * Font fallbacks (documented in docs/decisions/ADR-0005-design-system-fonts.md):
+ *   SuisseIntlCond -> Anton, SuisseIntl -> Inter Variable, SuisseIntlMono -> JetBrains Mono.
+ */
+@import 'tailwindcss';
+@import '@fontsource/anton/400.css';
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource/jetbrains-mono/400.css';
+
+@theme {
+  --color-*: initial;
+  --color-carbon: #000000;
+  --color-paper: #ffffff;
+  --color-canvas: #e5e5e5;
+  --color-mist: #f3f3f3;
+  --color-ash: #c6c6c6;
+  --color-smoke: #979797;
+  --color-slate: #444444;
+  --color-graphite: #2f2f2f;
+  --color-mint: #d1ffca;
+  --color-voltage: #fff100;
+  --color-transparent: transparent;
+
+  --font-display: 'Anton', 'Bebas Neue', 'Barlow Condensed', ui-sans-serif, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-button: 8px;
+  --radius-button-sm: 4px;
+  --radius-card: 32px;
+  --radius-card-sm: 24px;
+  --radius-pill: 48px;
+  --radius-tag: 64px;
+
+  --container-page: 1200px;
+}
+
+@layer base {
+  html {
+    background: var(--color-canvas);
+    color: var(--color-carbon);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-carbon);
+    outline-offset: 3px;
+  }
+  .inverted :focus-visible {
+    outline-color: var(--color-mint);
+  }
+}
+
+@layer components {
+  /* Uppercase condensed display type: never below 48px, never above 0.95 line-height. */
+  .display {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    line-height: 0.9;
+    letter-spacing: -0.03em;
+    font-size: clamp(48px, 9vw, 130px);
+  }
+  /* Secondary heading: SuisseIntl 450, uppercase. */
+  .heading {
+    font-weight: 450;
+    text-transform: uppercase;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-size: clamp(28px, 3.2vw, 40px);
+  }
+  .mono-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    letter-spacing: -0.03em;
+    text-transform: uppercase;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

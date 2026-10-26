@@ -1,0 +1,14 @@
+{
+  "name": "@nazar/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turbo task wrappers for the Python FastAPI service (managed by uv)",
+  "scripts": {
+    "dev": "uv run --package nazar-api nazar-api --reload",
+    "start": "uv run --package nazar-api nazar-api",
+    "lint": "uv run ruff check src tests && uv run ruff format --check src tests",
+    "typecheck": "uv run mypy src tests",
+    "test": "uv run pytest tests",
+    "db:migrate": "uv run alembic upgrade head"
+  }
+}

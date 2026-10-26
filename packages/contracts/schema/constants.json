@@ -1,0 +1,120 @@
+{
+  "allowedTransitions": {
+    "analysis": [
+      "cancel_requested",
+      "exporting",
+      "failed"
+    ],
+    "cancel_requested": [
+      "cancelled",
+      "failed"
+    ],
+    "cancelled": [
+      "queued"
+    ],
+    "completed": [],
+    "created": [
+      "cancel_requested",
+      "failed",
+      "validating"
+    ],
+    "dense_reconstruction": [
+      "analysis",
+      "cancel_requested",
+      "exporting",
+      "failed",
+      "surface_processing"
+    ],
+    "depth_priors": [
+      "analysis",
+      "cancel_requested",
+      "dense_reconstruction",
+      "dynamic_analysis",
+      "exporting",
+      "failed",
+      "sensor_optimization",
+      "surface_processing"
+    ],
+    "dynamic_analysis": [
+      "analysis",
+      "cancel_requested",
+      "dense_reconstruction",
+      "exporting",
+      "failed",
+      "sensor_optimization",
+      "surface_processing"
+    ],
+    "exporting": [
+      "cancel_requested",
+      "completed",
+      "failed"
+    ],
+    "failed": [
+      "queued"
+    ],
+    "geometry": [
+      "analysis",
+      "cancel_requested",
+      "dense_reconstruction",
+      "depth_priors",
+      "dynamic_analysis",
+      "exporting",
+      "failed",
+      "sensor_optimization",
+      "surface_processing"
+    ],
+    "preprocessing": [
+      "analysis",
+      "cancel_requested",
+      "dense_reconstruction",
+      "depth_priors",
+      "dynamic_analysis",
+      "exporting",
+      "failed",
+      "geometry",
+      "sensor_optimization",
+      "surface_processing"
+    ],
+    "queued": [
+      "cancel_requested",
+      "failed",
+      "preprocessing"
+    ],
+    "sensor_optimization": [
+      "analysis",
+      "cancel_requested",
+      "dense_reconstruction",
+      "exporting",
+      "failed",
+      "surface_processing"
+    ],
+    "surface_processing": [
+      "analysis",
+      "cancel_requested",
+      "exporting",
+      "failed"
+    ],
+    "validating": [
+      "cancel_requested",
+      "failed",
+      "queued"
+    ]
+  },
+  "eventSchemaVersion": 1,
+  "pipelineStages": [
+    "preprocessing",
+    "geometry",
+    "depth_priors",
+    "dynamic_analysis",
+    "sensor_optimization",
+    "dense_reconstruction",
+    "surface_processing",
+    "analysis",
+    "exporting"
+  ],
+  "terminalStatuses": [
+    "cancelled",
+    "completed",
+    "failed"
+  ]
+}

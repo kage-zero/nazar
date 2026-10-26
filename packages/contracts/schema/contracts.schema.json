@@ -1,0 +1,1325 @@
+{
+  "$defs": {
+    "ArtifactAvailable": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ArtifactManifest"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "artifact.available",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "ArtifactAvailable",
+      "type": "object"
+    },
+    "ArtifactKind": {
+      "enum": [
+        "keyframes",
+        "point_cloud_preview",
+        "point_cloud",
+        "camera_trajectory",
+        "depth_maps",
+        "dynamic_masks",
+        "gaussian_scene",
+        "mesh",
+        "report",
+        "export"
+      ],
+      "title": "ArtifactKind",
+      "type": "string"
+    },
+    "ArtifactManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bounds3D"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "byte_size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "checksum_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoordinateFrame"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ArtifactKind"
+        },
+        "lod": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "point_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "revision": {
+          "description": "Monotonic per (job, kind); stale revisions are ignored.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "source_frames": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "transform_to_frame": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 16,
+              "minItems": 16,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Column-major 4x4 from artifact-local coords to `frame`."
+        }
+      },
+      "required": [
+        "id",
+        "job_id",
+        "kind",
+        "revision",
+        "media_type",
+        "byte_size",
+        "checksum_sha256",
+        "provenance",
+        "created_at"
+      ],
+      "title": "ArtifactManifest",
+      "type": "object"
+    },
+    "Bounds3D": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "title": "Bounds3D",
+      "type": "object"
+    },
+    "CancelRequested": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "cancel.requested",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type"
+      ],
+      "title": "CancelRequested",
+      "type": "object"
+    },
+    "CheckStatus": {
+      "enum": [
+        "ok",
+        "degraded",
+        "unavailable",
+        "not_configured",
+        "not_implemented"
+      ],
+      "title": "CheckStatus",
+      "type": "string"
+    },
+    "CoordinateFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "axes": {
+          "default": "right-handed; +X right, +Y up, -Z forward (OpenGL camera convention)",
+          "description": "Axis convention of stored coordinates.",
+          "type": "string"
+        },
+        "crs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "EPSG/WKT identifier when georeferenced."
+        },
+        "scale_status": {
+          "$ref": "#/$defs/ScaleStatus"
+        },
+        "type": {
+          "$ref": "#/$defs/FrameType"
+        },
+        "units": {
+          "description": "Linear units of coordinates, e.g. 'metre' or 'unitless'.",
+          "type": "string"
+        },
+        "vertical_datum": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "type",
+        "units",
+        "scale_status"
+      ],
+      "title": "CoordinateFrame",
+      "type": "object"
+    },
+    "EventType": {
+      "enum": [
+        "job.created",
+        "stage.started",
+        "stage.progress",
+        "stage.completed",
+        "stage.skipped",
+        "warning",
+        "artifact.available",
+        "preview.updated",
+        "job.completed",
+        "job.failed",
+        "cancel.requested",
+        "job.cancelled"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "FrameRange": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_index": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "first_index",
+        "last_index",
+        "count"
+      ],
+      "title": "FrameRange",
+      "type": "object"
+    },
+    "FrameType": {
+      "enum": [
+        "local_reconstruction",
+        "enu",
+        "ecef",
+        "geographic",
+        "projected"
+      ],
+      "title": "FrameType",
+      "type": "string"
+    },
+    "HealthResponse": {
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "status": {
+          "const": "ok",
+          "type": "string"
+        },
+        "time": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "service",
+        "version",
+        "environment",
+        "time"
+      ],
+      "title": "HealthResponse",
+      "type": "object"
+    },
+    "JobCancelled": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "job.cancelled",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type"
+      ],
+      "title": "JobCancelled",
+      "type": "object"
+    },
+    "JobCompleted": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JobCompletedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "job.completed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "JobCompleted",
+      "type": "object"
+    },
+    "JobCompletedData": {
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_ids"
+      ],
+      "title": "JobCompletedData",
+      "type": "object"
+    },
+    "JobCreated": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JobCreatedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "job.created",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "JobCreated",
+      "type": "object"
+    },
+    "JobCreatedData": {
+      "properties": {
+        "mission_id": {
+          "type": "string"
+        },
+        "test_pipeline": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mission_id",
+        "test_pipeline"
+      ],
+      "title": "JobCreatedData",
+      "type": "object"
+    },
+    "JobFailed": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JobFailedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "job.failed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "JobFailed",
+      "type": "object"
+    },
+    "JobFailedData": {
+      "properties": {
+        "reason": {
+          "description": "Human-readable, actionable failure reason.",
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reason",
+        "retryable"
+      ],
+      "title": "JobFailedData",
+      "type": "object"
+    },
+    "JobStatus": {
+      "enum": [
+        "created",
+        "validating",
+        "queued",
+        "preprocessing",
+        "geometry",
+        "depth_priors",
+        "dynamic_analysis",
+        "sensor_optimization",
+        "dense_reconstruction",
+        "surface_processing",
+        "analysis",
+        "exporting",
+        "completed",
+        "failed",
+        "cancel_requested",
+        "cancelled"
+      ],
+      "title": "JobStatus",
+      "type": "string"
+    },
+    "PreviewUpdated": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/PreviewUpdatedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "preview.updated",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "PreviewUpdated",
+      "type": "object"
+    },
+    "PreviewUpdatedData": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "revision"
+      ],
+      "title": "PreviewUpdatedData",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "config_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "producer": {
+          "description": "Stage adapter that produced the artifact.",
+          "type": "string"
+        },
+        "test_pipeline": {
+          "description": "True when produced by the deterministic test pipeline, not a real model.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "producer",
+        "test_pipeline"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "ReadinessCheck": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "detail",
+        "required"
+      ],
+      "title": "ReadinessCheck",
+      "type": "object"
+    },
+    "ReadinessResponse": {
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ReadinessCheck"
+          },
+          "type": "array"
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ready",
+        "checks"
+      ],
+      "title": "ReadinessResponse",
+      "type": "object"
+    },
+    "ScaleStatus": {
+      "enum": [
+        "unknown",
+        "relative",
+        "metric_estimated",
+        "metric_sensor"
+      ],
+      "title": "ScaleStatus",
+      "type": "string"
+    },
+    "StageCompleted": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/StageCompletedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.completed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "StageCompleted",
+      "type": "object"
+    },
+    "StageCompletedData": {
+      "properties": {
+        "duration_s": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "duration_s"
+      ],
+      "title": "StageCompletedData",
+      "type": "object"
+    },
+    "StageName": {
+      "description": "Processing stages. Each value is also the job status while that stage runs.",
+      "enum": [
+        "preprocessing",
+        "geometry",
+        "depth_priors",
+        "dynamic_analysis",
+        "sensor_optimization",
+        "dense_reconstruction",
+        "surface_processing",
+        "analysis",
+        "exporting"
+      ],
+      "title": "StageName",
+      "type": "string"
+    },
+    "StageProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/StageProgressData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.progress",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "StageProgress",
+      "type": "object"
+    },
+    "StageProgressData": {
+      "properties": {
+        "completed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Units of real work done. Null when not measurable."
+        },
+        "message": {
+          "type": "string"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Total units. Null means indeterminate progress."
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "e.g. 'frames', 'keyframes', 'iterations'"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "StageProgressData",
+      "type": "object"
+    },
+    "StageSkipped": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/StageSkippedData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.skipped",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "StageSkipped",
+      "type": "object"
+    },
+    "StageSkippedData": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "StageSkippedData",
+      "type": "object"
+    },
+    "StageStarted": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.started",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type"
+      ],
+      "title": "StageStarted",
+      "type": "object"
+    },
+    "WarningData": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "title": "WarningData",
+      "type": "object"
+    },
+    "WarningRaised": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/WarningData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "warning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "WarningRaised",
+      "type": "object"
+    }
+  },
+  "description": "Bundle that pulls every public contract into one schema document.",
+  "properties": {
+    "artifact_manifest": {
+      "$ref": "#/$defs/ArtifactManifest"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType"
+    },
+    "health": {
+      "$ref": "#/$defs/HealthResponse"
+    },
+    "job_event": {
+      "discriminator": {
+        "mapping": {
+          "artifact.available": "#/$defs/ArtifactAvailable",
+          "cancel.requested": "#/$defs/CancelRequested",
+          "job.cancelled": "#/$defs/JobCancelled",
+          "job.completed": "#/$defs/JobCompleted",
+          "job.created": "#/$defs/JobCreated",
+          "job.failed": "#/$defs/JobFailed",
+          "preview.updated": "#/$defs/PreviewUpdated",
+          "stage.completed": "#/$defs/StageCompleted",
+          "stage.progress": "#/$defs/StageProgress",
+          "stage.skipped": "#/$defs/StageSkipped",
+          "stage.started": "#/$defs/StageStarted",
+          "warning": "#/$defs/WarningRaised"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/JobCreated"
+        },
+        {
+          "$ref": "#/$defs/StageStarted"
+        },
+        {
+          "$ref": "#/$defs/StageProgress"
+        },
+        {
+          "$ref": "#/$defs/StageCompleted"
+        },
+        {
+          "$ref": "#/$defs/StageSkipped"
+        },
+        {
+          "$ref": "#/$defs/WarningRaised"
+        },
+        {
+          "$ref": "#/$defs/ArtifactAvailable"
+        },
+        {
+          "$ref": "#/$defs/PreviewUpdated"
+        },
+        {
+          "$ref": "#/$defs/JobCompleted"
+        },
+        {
+          "$ref": "#/$defs/JobFailed"
+        },
+        {
+          "$ref": "#/$defs/CancelRequested"
+        },
+        {
+          "$ref": "#/$defs/JobCancelled"
+        }
+      ],
+      "title": "Job Event"
+    },
+    "job_status": {
+      "$ref": "#/$defs/JobStatus"
+    },
+    "readiness": {
+      "$ref": "#/$defs/ReadinessResponse"
+    },
+    "stage_name": {
+      "$ref": "#/$defs/StageName"
+    }
+  },
+  "required": [
+    "health",
+    "readiness",
+    "job_event",
+    "artifact_manifest",
+    "job_status",
+    "stage_name",
+    "event_type"
+  ],
+  "title": "NazarContracts",
+  "type": "object"
+}

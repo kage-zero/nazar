@@ -1,0 +1,20 @@
+{
+  "name": "@nazar/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript view of the NAZAR contracts, generated from the Pydantic models",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "contracts:generate": "uv run python scripts/export_schema.py && node scripts/generate-ts.mjs",
+    "contracts:check": "uv run python scripts/export_schema.py --check && node scripts/generate-ts.mjs --check",
+    "typecheck": "tsc --noEmit && uv run mypy python tests scripts",
+    "test": "uv run pytest tests"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "6.0.3"
+  }
+}

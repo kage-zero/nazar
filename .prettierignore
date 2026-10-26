@@ -1,0 +1,12 @@
+pnpm-lock.yaml
+uv.lock
+dist/
+.turbo/
+playwright-report/
+test-results/
+var/
+docs/*.md
+docs/*.pdf
+docs/sample/
+packages/contracts/src/generated.ts
+packages/contracts/schema/

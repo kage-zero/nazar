@@ -1,0 +1,37 @@
+# OPTIONAL supporting services. Local development works without Docker
+# (SQLite + local filesystem storage). Use this when you want PostgreSQL/PostGIS,
+# Redis and MinIO locally. Credentials come from the repo-root .env (never hard-coded):
+#   docker compose --env-file ../.env -f infra/docker-compose.yml up -d
+# Then set NAZAR_DATABASE_URL / NAZAR_REDIS_URL / NAZAR_S3_* in .env accordingly.
+name: nazar
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: nazar
+      POSTGRES_USER: nazar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports: ['127.0.0.1:5432:5432']
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U nazar -d nazar']
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    ports: ['127.0.0.1:6379:6379']
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    ports: ['127.0.0.1:9000:9000', '127.0.0.1:9001:9001']
+    volumes: [minio-data:/data]
+
+volumes:
+  postgres-data:
+  minio-data:
