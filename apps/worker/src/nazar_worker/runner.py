@@ -16,12 +16,14 @@ from nazar_contracts import (
     ArtifactCreate,
     ArtifactCreated,
     EventType,
+    GeometryBackend,
     PipelineMode,
     StageName,
     WorkerEvent,
     WorkerLease,
 )
 from nazar_worker.client import ApiCallFailed, LeaseLost, WorkerClient
+from nazar_worker.fast3r import Fast3rRuntime
 from nazar_worker.stages import (
     Cancelled,
     StageAdapter,
@@ -222,6 +224,14 @@ def _reason(exc: Exception) -> str:
     return f"Worker error: {text}"[:500]
 
 
+def geometry_backend(modes: list[PipelineMode]) -> GeometryBackend | None:
+    """Reported on every lease so readiness shows what standard jobs would use."""
+    if PipelineMode.STANDARD not in modes:
+        return None
+    usable = isinstance(Fast3rRuntime.from_env(), Fast3rRuntime)
+    return GeometryBackend.FAST3R if usable else GeometryBackend.CPU_BASELINE
+
+
 def run_loop(
     client: WorkerClient,
     worker_id: str,
@@ -239,7 +249,7 @@ def run_loop(
     log.info("worker %s polling for %s jobs", worker_id, ",".join(m.value for m in modes))
     while not stop():
         try:
-            lease = client.lease(worker_id, modes)
+            lease = client.lease(worker_id, modes, geometry_backend(modes))
         except ApiCallFailed as exc:
             log.warning("lease request failed: %s", exc)
             lease = None

@@ -798,6 +798,15 @@
       "title": "FrameType",
       "type": "string"
     },
+    "GeometryBackend": {
+      "description": "What a worker's standard pipeline would use for geometry right now.",
+      "enum": [
+        "fast3r",
+        "cpu-baseline"
+      ],
+      "title": "GeometryBackend",
+      "type": "string"
+    },
     "HealthResponse": {
       "properties": {
         "environment": {
@@ -1343,7 +1352,7 @@
       "type": "object"
     },
     "PipelineMode": {
-      "description": "Which stage implementations a job uses.\n\n- `test`: deterministic test pipeline. Emits small real-format fixture artifacts through\n  the real API and event contracts. Never presented as a reconstruction of the input.\n- `standard`: real stages (CPU classical geometry today; GPU models when integrated).",
+      "description": "Which stage implementations a job uses.\n\n- `test`: deterministic test pipeline. Emits small real-format fixture artifacts through\n  the real API and event contracts. Never presented as a reconstruction of the input.\n- `standard`: real stages (Fast3R on the GPU when the worker has it, else the CPU\n  classical-geometry baseline).",
       "enum": [
         "test",
         "standard"
@@ -2408,6 +2417,18 @@
     "WorkerLeaseRequest": {
       "additionalProperties": false,
       "properties": {
+        "geometry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GeometryBackend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Geometry backend for standard jobs on this worker (absent: not reported)."
+        },
         "modes": {
           "items": {
             "$ref": "#/$defs/PipelineMode"

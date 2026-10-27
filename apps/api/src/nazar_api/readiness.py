@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from nazar_api.db import get_engine
 from nazar_api.models import User
 from nazar_api.settings import Settings
-from nazar_contracts import CheckStatus, ReadinessCheck, ReadinessResponse
+from nazar_contracts import CheckStatus, GeometryBackend, ReadinessCheck, ReadinessResponse
 
 log = logging.getLogger(__name__)
 
@@ -120,8 +120,36 @@ def _worker(seen_at: datetime | None) -> ReadinessCheck:
     )
 
 
+def _gpu(seen_at: datetime | None, geometry: GeometryBackend | None) -> ReadinessCheck:
+    fresh = seen_at is not None and (datetime.now(UTC) - seen_at).total_seconds() <= WORKER_FRESH_S
+    if fresh and geometry is GeometryBackend.FAST3R:
+        return ReadinessCheck(
+            name="gpu",
+            status=CheckStatus.OK,
+            detail="The worker has the Fast3R GPU runtime: Reconstruct uses dense learned "
+            "geometry. Each job report records the GPU and memory it used.",
+            required=False,
+        )
+    if fresh and geometry is GeometryBackend.CPU_BASELINE:
+        return ReadinessCheck(
+            name="gpu",
+            status=CheckStatus.NOT_CONFIGURED,
+            detail="The worker has no Fast3R GPU runtime, so Reconstruct uses the CPU baseline "
+            "(sparse). Set it up with `pnpm gpu:setup` (docs/ENVIRONMENT_SETUP.md).",
+            required=False,
+        )
+    return ReadinessCheck(
+        name="gpu",
+        status=CheckStatus.NOT_CONFIGURED,
+        detail="No worker running standard jobs has reported its GPU runtime in the last minute.",
+        required=False,
+    )
+
+
 def check_readiness(
-    settings: Settings, worker_seen_at: datetime | None = None
+    settings: Settings,
+    worker_seen_at: datetime | None = None,
+    worker_geometry: GeometryBackend | None = None,
 ) -> ReadinessResponse:
     checks = [
         _database(settings),
@@ -130,12 +158,7 @@ def check_readiness(
         _secret("NAZAR_WORKER_TOKEN", settings.worker_token, "Authenticates the GPU worker"),
         _accounts(settings),
         _worker(worker_seen_at),
-        ReadinessCheck(
-            name="gpu",
-            status=CheckStatus.NOT_IMPLEMENTED,
-            detail="Workers do not report GPU details yet (needs Milestone 1 on the VDI).",
-            required=False,
-        ),
+        _gpu(worker_seen_at, worker_geometry),
     ]
     ready = all(c.status is CheckStatus.OK for c in checks if c.required)
     return ReadinessResponse(ready=ready, checks=checks)

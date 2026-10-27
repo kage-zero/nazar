@@ -18,10 +18,10 @@ from nazar_api.jobs import expire_leases
 from nazar_api.main import create_app
 from nazar_api.models import AssetRecord, JobRecord, utcnow
 from nazar_api.storage import PREFLIGHT_DIR, asset_dir
-from nazar_contracts import PipelineMode, StageName, WorkerLease
+from nazar_contracts import GeometryBackend, PipelineMode, StageName, WorkerLease
 from nazar_worker.client import WorkerClient
 from nazar_worker.ply import read_ply
-from nazar_worker.runner import JobRun, run_loop
+from nazar_worker.runner import JobRun, geometry_backend, run_loop
 from nazar_worker.stages import StageContext
 
 TOKEN = "test-only-worker-token-not-a-secret"
@@ -398,3 +398,25 @@ def test_jobs_are_private(app_client: TestClient) -> None:
     app_client.post("/api/auth/logout")
     assert app_client.get(f"/api/jobs/{job['id']}").status_code == 401
     assert app_client.get(f"/api/jobs/{job['id']}/events").status_code == 401
+
+
+def test_readiness_reports_the_worker_geometry_backend(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def gpu() -> dict[str, str]:
+        checks = app_client.get("/api/ready").json()["checks"]
+        return next(c for c in checks if c["name"] == "gpu")
+
+    assert gpu()["status"] == "not_configured"
+    assert "No worker" in gpu()["detail"]
+    worker = worker_client(app_client)
+    monkeypatch.delenv("NAZAR_FAST3R_PYTHON", raising=False)
+    assert (
+        worker.lease("w1", [PipelineMode.STANDARD], geometry_backend([PipelineMode.STANDARD]))
+        is None
+    )
+    assert gpu()["status"] == "not_configured"
+    assert "CPU baseline" in gpu()["detail"]
+    assert worker.lease("w1", [PipelineMode.TEST], GeometryBackend.FAST3R) is None
+    assert gpu()["status"] == "ok"
+    assert geometry_backend([PipelineMode.TEST]) is None

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from nazar_contracts import (
     ArtifactCreate,
     ArtifactCreated,
+    GeometryBackend,
     PipelineMode,
     WorkerEvent,
     WorkerEventAck,
@@ -108,11 +109,15 @@ class WorkerClient:
         status, data = self._request(method, path, body)
         return None if status == 204 or not data else json.loads(data)
 
-    def lease(self, worker_id: str, modes: list[PipelineMode]) -> WorkerLease | None:
+    def lease(
+        self,
+        worker_id: str,
+        modes: list[PipelineMode],
+        geometry: GeometryBackend | None = None,
+    ) -> WorkerLease | None:
         self.lease_id = None
-        got = self._json(
-            "POST", "/api/worker/lease", WorkerLeaseRequest(worker_id=worker_id, modes=modes)
-        )
+        body = WorkerLeaseRequest(worker_id=worker_id, modes=modes, geometry=geometry)
+        got = self._json("POST", "/api/worker/lease", body)
         if got is None:
             return None
         lease = WorkerLease.model_validate(got)

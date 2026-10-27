@@ -32,11 +32,19 @@ class PipelineMode(StrEnum):
 
     - `test`: deterministic test pipeline. Emits small real-format fixture artifacts through
       the real API and event contracts. Never presented as a reconstruction of the input.
-    - `standard`: real stages (CPU classical geometry today; GPU models when integrated).
+    - `standard`: real stages (Fast3R on the GPU when the worker has it, else the CPU
+      classical-geometry baseline).
     """
 
     TEST = "test"
     STANDARD = "standard"
+
+
+class GeometryBackend(StrEnum):
+    """What a worker's standard pipeline would use for geometry right now."""
+
+    FAST3R = "fast3r"
+    CPU_BASELINE = "cpu-baseline"
 
 
 class StageRunState(StrEnum):
@@ -86,6 +94,10 @@ class JobCreate(_Model):
 class WorkerLeaseRequest(_Model):
     worker_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     modes: list[PipelineMode] = Field(min_length=1)
+    geometry: GeometryBackend | None = Field(
+        default=None,
+        description="Geometry backend for standard jobs on this worker (absent: not reported).",
+    )
 
 
 class WorkerLease(_Model):

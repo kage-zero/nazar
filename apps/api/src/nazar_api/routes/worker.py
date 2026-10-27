@@ -87,7 +87,11 @@ LeasedJob = Annotated[JobRecord, Depends(leased_job)]
 
 
 @router.post("/lease", response_model=WorkerLease, responses={204: {"description": "No work"}})
-def lease(body: WorkerLeaseRequest, db: DbDep, settings: SettingsDep) -> WorkerLease | Response:
+def lease(
+    body: WorkerLeaseRequest, request: Request, db: DbDep, settings: SettingsDep
+) -> WorkerLease | Response:
+    if body.geometry is not None:
+        request.app.state.worker_geometry = body.geometry
     got = lease_next(db, body.worker_id, body.modes, settings.worker_lease_seconds)
     if got is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)

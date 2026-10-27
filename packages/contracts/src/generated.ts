@@ -61,7 +61,8 @@ export type EventType =
  *
  * - `test`: deterministic test pipeline. Emits small real-format fixture artifacts through
  *   the real API and event contracts. Never presented as a reconstruction of the input.
- * - `standard`: real stages (CPU classical geometry today; GPU models when integrated).
+ * - `standard`: real stages (Fast3R on the GPU when the worker has it, else the CPU
+ *   classical-geometry baseline).
  *
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "PipelineMode".
@@ -144,6 +145,13 @@ export type WarningSeverity = 'info' | 'warning' | 'blocking';
  * via the `definition` "CheckStatus".
  */
 export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' | 'not_implemented';
+/**
+ * What a worker's standard pipeline would use for geometry right now.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "GeometryBackend".
+ */
+export type GeometryBackend = 'fast3r' | 'cpu-baseline';
 
 /**
  * Bundle that pulls every public contract into one schema document.
@@ -936,6 +944,10 @@ export interface WorkerLease {
  * via the `definition` "WorkerLeaseRequest".
  */
 export interface WorkerLeaseRequest {
+  /**
+   * Geometry backend for standard jobs on this worker (absent: not reported).
+   */
+  geometry?: GeometryBackend | null;
   /**
    * @minItems 1
    */
