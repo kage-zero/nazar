@@ -5,6 +5,7 @@ runtime is configured (NAZAR_FAST3R_PYTHON / NAZAR_FAST3R_WEIGHTS), otherwise it
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from nazar_api.storage import PREFLIGHT_DIR, asset_dir
 from nazar_contracts import PipelineMode
 from nazar_media import run_preflight
 from nazar_worker.fast3r import Fast3rRuntime
+from nazar_worker.las import read_las, to_las_axes
 from nazar_worker.ply import ESTIMATED, OBSERVED, read_confidence, read_ply
 from nazar_worker.runner import run_loop
 
@@ -65,6 +67,15 @@ def cloud_points(client: TestClient, snap: dict[str, Any], report: dict[str, Any
     assert labels is not None
     assert int((labels == OBSERVED).sum()) == report["confidence"]["observed"]
     assert int((labels == ESTIMATED).sum()) == report["confidence"]["estimated"]
+    # The LAS export holds the same points (axes converted to +Z up), colours and classes.
+    export = next(a for a in snap["artifacts"] if a["kind"] == "export")
+    assert export["media_type"] == "application/vnd.las"
+    las = read_las(client.get(f"/api/artifacts/{export['id']}/content").content)
+    xyz = np.array([p[:3] for p in pts], dtype=np.float64)
+    assert np.abs(las.xyz - to_las_axes(xyz)).max() < 1e-4
+    assert (las.user_data == labels).all()
+    assert las.system_id == "NAZAR local frame, no CRS"
+    assert "las" in report["exports"]
     return len(pts)
 
 

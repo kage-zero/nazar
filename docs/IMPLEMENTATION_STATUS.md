@@ -84,11 +84,22 @@ There is no ground truth, so these numbers are density, speed and self-consisten
 - **Not interactive yet.** Confidence colouring in the viewer, measurement tools, exports (LAS/GLB) and meshing are not built.
 - **Licence.** Fast3R is non-commercial and archived upstream. It is approved for this academic project only.
 
+### Added after the report (same day)
+
+- **Confidence colouring in the viewer.** Final PLY clouds carry a per-point `confidence` class (1 observed, 2 estimated). **Colour by confidence** recolours the cloud (blue/orange; the palette is validated for colour-vision deficiency on the black viewer) and shows a counted legend. API tests check that the classes match the report; E2E checks the legend on both the CPU and Fast3R paths.
+- **LAS export.** The final cloud is also published as LAS 1.2, point format 2 (`nazar_worker/las.py`, numpy only):
+  - no CRS, because the frame is local; the system identifier says "NAZAR local frame, no CRS";
+  - axes converted to +Z up;
+  - confidence class in the user-data byte.
+
+  Tests check the header byte offsets against the specification and a round trip, and that the real pipeline's LAS equals its PLY. Opening it in a third-party viewer is pending (B9).
+- **Readiness `gpu` check is real.** Workers report their geometry backend (`fast3r` or `cpu-baseline`) on each lease. Readiness shows OK for Fast3R, or explains that the CPU baseline is in use.
+
 ### Next step
 
-1. Your checks: B7 and the new B8 in `PENDING_USER_TESTS.md`.
+1. Your checks: B7, B8 and B9 in `PENDING_USER_TESTS.md`.
 2. Milestone 1 on the college GPU: `pnpm gpu:check` there, then sample2 with larger passes.
-3. On the laptop: confidence colouring and measurement tools in the viewer, telemetry import, and exports.
+3. On the laptop: measurement tools (relative distances) in the viewer, telemetry import, and a GLB export.
 
 ## Milestone 3 report — CPU baseline slice (2026-10-27, Windows 11 laptop, CPU only)
 
@@ -266,7 +277,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
 2. **Milestone 2 remainder:** optional telemetry import (CSV, DJI SRT) attached to a mission, with a time-alignment check against video timestamps.
 3. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
-4. **Viewer:** confidence colouring, measurement tools, LAS/GLB export.
+4. **Viewer:** measurement tools (relative), GLB export.
 
 ## Resume instructions
 

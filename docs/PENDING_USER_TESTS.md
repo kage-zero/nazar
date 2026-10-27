@@ -55,6 +55,14 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
   If the job instead shows a "fast3r_fallback" warning, its message gives the reason. "unknown error" or "Memory allocation failure" means Windows ran short of commit memory: close heavy apps, or reboot, and retry.
 
   The automated version is `NAZAR_E2E_FAST3R=1 pnpm test:e2e` (it uses ports 18765/15174, so your `reelbox` on 8765 is not touched).
+- [ ] **B9. Confidence colouring and LAS export.**
+  1. After a Reconstruct job completes, press **Colour by confidence**.
+     - Expected: points turn blue (observed) or orange (estimated), and a legend gives the counts, matching the processing report.
+     - With Fast3R on sample1, the Colosseum ring is mostly blue and the surrounding city orange.
+  2. Download **Point cloud (LAS)** and open it in CloudCompare (or any LAS viewer).
+     - Expected: the same coloured cloud, with +Z up and no coordinate system. Values are unitless because the scale is unknown.
+     - The confidence class is in the "user data" field.
+  - _Why it needs you:_ the LAS writer is checked against the ASPRS 1.2 byte offsets and by a round trip, but no third-party LAS reader could be downloaded tonight (network timeout).
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make

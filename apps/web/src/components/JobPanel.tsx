@@ -61,7 +61,13 @@ function fmtBytes(n: number) {
 }
 
 function extension(a: ArtifactManifest) {
-  return a.media_type.includes('ply') ? 'ply' : a.media_type.includes('json') ? 'json' : 'bin';
+  if (a.media_type.includes('ply')) return 'ply';
+  if (a.media_type.includes('las')) return 'las';
+  return a.media_type.includes('json') ? 'json' : 'bin';
+}
+
+function outputName(a: ArtifactManifest) {
+  return a.kind === 'export' && extension(a) === 'las' ? 'Point cloud (LAS)' : KIND_TEXT[a.kind];
 }
 
 function Inventory({ artifacts }: { artifacts: ArtifactManifest[] }) {
@@ -70,7 +76,7 @@ function Inventory({ artifacts }: { artifacts: ArtifactManifest[] }) {
       {artifacts.map((a) => (
         <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-2 py-3">
           <span className="flex flex-col">
-            <span className="font-medium">{KIND_TEXT[a.kind]}</span>
+            <span className="font-medium">{outputName(a)}</span>
             <span className="font-mono text-xs text-slate">
               rev {a.revision} · {fmtBytes(a.byte_size)}
               {a.point_count != null ? ` · ${a.point_count.toLocaleString()} pts` : ''}
