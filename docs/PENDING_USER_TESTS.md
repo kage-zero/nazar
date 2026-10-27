@@ -63,6 +63,7 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
      - Expected: the same coloured cloud, with +Z up and no coordinate system. Values are unitless because the scale is unknown.
      - The confidence class is in the "user data" field.
   - _Why it needs you:_ the LAS writer is checked against the ASPRS 1.2 byte offsets and by a round trip, but no third-party LAS reader could be downloaded tonight (network timeout).
+- [ ] **B10. Measure.** Press **Measure**, click a point on the cloud, then another. Expected: white markers, a white segment, and "Distance: … units (relative; scale unknown)". A third click starts a new measurement. Check that picking feels accurate (it snaps to the nearest point within a small radius).
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make

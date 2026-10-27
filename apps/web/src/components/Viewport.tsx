@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { CONFIDENCE_CLASSES } from '../lib/confidence';
+import { distance, distanceText } from '../lib/measure';
 import { sourceText } from '../lib/provenance';
 import { useViewerStore } from '../state/viewerStore';
 import { Button, Card, Tag } from './ui';
@@ -27,6 +28,14 @@ export function Viewport() {
   const kindText = loaded?.kind === 'point_cloud' ? 'Final cloud' : 'Preview';
   const confidence = loaded?.confidence ?? null;
   const byConfidence = s.colorBy === 'confidence' && confidence !== null;
+  const [a, b] = s.picks;
+  const measureText = !s.measuring
+    ? null
+    : a && b
+      ? `Distance: ${distanceText(distance(a, b), cloud?.frame?.scale_status)}`
+      : a
+        ? 'Click a second point.'
+        : 'Click a point in the cloud to start measuring.';
 
   return (
     <Card
@@ -60,6 +69,15 @@ export function Viewport() {
               data-testid="viewer-loaded"
             >
               {kindText} · revision {loaded.revision} · {loaded.points.toLocaleString()} points
+            </p>
+          ) : null}
+          {measureText ? (
+            <p
+              className="font-mono text-xs text-paper"
+              aria-live="polite"
+              data-testid="measure-readout"
+            >
+              {measureText}
             </p>
           ) : null}
           {byConfidence ? (
@@ -130,6 +148,11 @@ export function Viewport() {
               }}
             >
               Colour by confidence
+            </Button>
+          )}
+          {cloud && (
+            <Button variant="ghost-inverted" aria-pressed={s.measuring} onClick={s.toggleMeasure}>
+              Measure
             </Button>
           )}
           {path && (

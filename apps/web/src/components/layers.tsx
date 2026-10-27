@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Float32BufferAttribute, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { jobs } from '../api/jobs';
+import type { Vec3 } from '../lib/measure';
 import { confidenceColors, countConfidence } from '../lib/confidence';
 import { useViewerStore } from '../state/viewerStore';
 
@@ -29,6 +30,8 @@ interface ParsedCloud {
 export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
   const [cloud, setCloud] = useState<ParsedCloud | null>(null);
   const colorBy = useViewerStore((s) => s.colorBy);
+  const measuring = useViewerStore((s) => s.measuring);
+  const pick = useViewerStore((s) => s.pick);
   const setLoaded = useViewerStore((s) => s.setLoaded);
   const setLayerError = useViewerStore((s) => s.setLayerError);
 
@@ -81,7 +84,17 @@ export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
 
   if (!cloud) return null;
   return (
-    <points geometry={cloud.geometry}>
+    <points
+      geometry={cloud.geometry}
+      onClick={(e) => {
+        if (!measuring) return;
+        e.stopPropagation();
+        // Snap to the clicked point itself, not the ray's closest approach to it.
+        const position = cloud.geometry.getAttribute('position');
+        const i = e.index ?? -1;
+        if (i >= 0) pick([position.getX(i), position.getY(i), position.getZ(i)]);
+      }}
+    >
       <pointsMaterial size={0.06} sizeAttenuation vertexColors />
     </points>
   );
@@ -149,4 +162,22 @@ export function FitToBounds({ bounds }: { bounds: ArtifactManifest['bounds'] }) 
   }, [fitToken, camera, controls]);
 
   return null;
+}
+
+/** The two picked points of a measurement and the segment between them. */
+export function MeasureLayer({ picks }: { picks: Vec3[] }) {
+  if (picks.length === 0) return null;
+  return (
+    <group>
+      {picks.length === 2 && (
+        <Line points={picks} color="#ffffff" lineWidth={2} depthTest={false} renderOrder={2} />
+      )}
+      {picks.map((p, i) => (
+        <mesh key={i} position={p} renderOrder={3}>
+          <sphereGeometry args={[0.12, 12, 12]} />
+          <meshBasicMaterial color="#ffffff" depthTest={false} />
+        </mesh>
+      ))}
+    </group>
+  );
 }

@@ -93,13 +93,14 @@ There is no ground truth, so these numbers are density, speed and self-consisten
   - confidence class in the user-data byte.
 
   Tests check the header byte offsets against the specification and a round trip, and that the real pipeline's LAS equals its PLY. Opening it in a third-party viewer is pending (B9).
+- **Relative measurement.** **Measure** lets you click two cloud points; the viewer draws the segment and reports the distance as "N units (relative; scale unknown)", never in metres, while the scale is unknown. E2E picks two points on both the CPU and Fast3R clouds.
 - **Readiness `gpu` check is real.** Workers report their geometry backend (`fast3r` or `cpu-baseline`) on each lease. Readiness shows OK for Fast3R, or explains that the CPU baseline is in use.
 
 ### Next step
 
 1. Your checks: B7, B8 and B9 in `PENDING_USER_TESTS.md`.
 2. Milestone 1 on the college GPU: `pnpm gpu:check` there, then sample2 with larger passes.
-3. On the laptop: measurement tools (relative distances) in the viewer, telemetry import, and a GLB export.
+3. On the laptop: telemetry import (gives scale and position), and a GLB export.
 
 ## Milestone 3 report — CPU baseline slice (2026-10-27, Windows 11 laptop, CPU only)
 
@@ -277,7 +278,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
 2. **Milestone 2 remainder:** optional telemetry import (CSV, DJI SRT) attached to a mission, with a time-alignment check against video timestamps.
 3. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
-4. **Viewer:** measurement tools (relative), GLB export.
+4. **Telemetry import** (DJI SRT / CSV), which would turn relative measurements into metric ones.
 
 ## Resume instructions
 

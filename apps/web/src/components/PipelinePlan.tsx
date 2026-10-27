@@ -42,7 +42,7 @@ export const STAGE_COPY: Record<StageName, { label: string; detail: string; opti
   analysis: { label: 'Confidence', detail: 'Observed / estimated / inferred', optional: false },
   exporting: {
     label: 'Export & report',
-    detail: 'Point cloud, camera path, report',
+    detail: 'Point cloud (PLY, LAS), camera path, report',
     optional: false,
   },
 };

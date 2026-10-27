@@ -205,6 +205,29 @@ test('reconstruct builds real geometry from the sample video, progressively', as
   await toggle.click();
   await expect(legend).toHaveCount(0);
 
+  // Relative measurement: pick two cloud points (scan a grid; the sparse cloud has gaps).
+  await page.getByRole('button', { name: 'Measure' }).click();
+  const readout = page.getByTestId('measure-readout');
+  await expect(readout).toHaveText('Click a point in the cloud to start measuring.');
+  await page.getByRole('button', { name: 'Fit' }).click();
+  const canvas = page.getByTestId('viewer-canvas');
+  await canvas.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500); // let the damped orbit controls settle on the fitted view
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('viewer canvas has no box');
+  let picked = 0;
+  for (let gy = 0.3; gy <= 0.7 && picked < 2; gy += 0.05) {
+    for (let gx = 0.2; gx <= 0.8 && picked < 2; gx += 0.05) {
+      const before = await readout.textContent();
+      await page.mouse.click(box.x + box.width * gx, box.y + box.height * gy);
+      if ((await readout.textContent()) !== before) picked += 1;
+    }
+  }
+  await expect(readout).toHaveText(/^Distance: \d+(\.\d+)? units \(relative; scale unknown\)$/);
+  await page.screenshot({ path: testInfo.outputPath('reconstruct-measure.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Measure' }).click();
+  await expect(readout).toHaveCount(0);
+
   await page.screenshot({ path: testInfo.outputPath('reconstruct-complete.png'), fullPage: true });
   expect(errors).toEqual([]);
 });

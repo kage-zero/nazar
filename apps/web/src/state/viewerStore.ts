@@ -1,6 +1,7 @@
 import type { ArtifactManifest } from '@nazar/contracts';
 import { create } from 'zustand';
 import type { ConfidenceCounts } from '../lib/confidence';
+import { addPick, type Vec3 } from '../lib/measure';
 
 /**
  * Small viewer UI state only. Geometry buffers never go in here: they live in
@@ -24,6 +25,8 @@ interface ViewerState {
   showCloud: boolean;
   showPath: boolean;
   colorBy: ColorBy;
+  measuring: boolean;
+  picks: Vec3[];
   resetToken: number;
   fitToken: number;
   cloud: ArtifactManifest | null;
@@ -35,6 +38,8 @@ interface ViewerState {
   toggleCloud: () => void;
   togglePath: () => void;
   setColorBy: (colorBy: ColorBy) => void;
+  toggleMeasure: () => void;
+  pick: (p: Vec3) => void;
   requestReset: () => void;
   requestFit: () => void;
   setLayers: (cloud: ArtifactManifest | null, path: ArtifactManifest | null) => void;
@@ -48,6 +53,8 @@ export const useViewerStore = create<ViewerState>()((set) => ({
   showCloud: true,
   showPath: true,
   colorBy: 'rgb',
+  measuring: false,
+  picks: [],
   resetToken: 0,
   fitToken: 0,
   cloud: null,
@@ -69,6 +76,12 @@ export const useViewerStore = create<ViewerState>()((set) => ({
   setColorBy: (colorBy) => {
     set({ colorBy });
   },
+  toggleMeasure: () => {
+    set((s) => ({ measuring: !s.measuring, picks: [] }));
+  },
+  pick: (p) => {
+    set((s) => (s.measuring ? { picks: addPick(s.picks, p) } : {}));
+  },
   requestReset: () => {
     set((s) => ({ resetToken: s.resetToken + 1 }));
   },
@@ -84,6 +97,7 @@ export const useViewerStore = create<ViewerState>()((set) => ({
         cloud,
         path,
         fitToken: firstForJob ? s.fitToken + 1 : s.fitToken,
+        picks: firstForJob || cloud === null ? [] : s.picks,
         loaded: cloud ? s.loaded : null,
       };
     });

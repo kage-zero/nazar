@@ -2,7 +2,7 @@ import { Grid, OrbitControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { useEffect, useRef, type ComponentRef } from 'react';
 import { useViewerStore } from '../state/viewerStore';
-import { FitToBounds, PointCloudLayer, TrajectoryLayer } from './layers';
+import { FitToBounds, MeasureLayer, PointCloudLayer, TrajectoryLayer } from './layers';
 
 const HOME_POSITION = [6, 4.5, 8] as const;
 
@@ -19,6 +19,7 @@ export default function ViewerScene() {
   const resetToken = useViewerStore((s) => s.resetToken);
   const cloud = useViewerStore((s) => s.cloud);
   const path = useViewerStore((s) => s.path);
+  const picks = useViewerStore((s) => s.picks);
 
   useEffect(() => {
     if (resetToken > 0) controls.current?.reset();
@@ -28,6 +29,10 @@ export default function ViewerScene() {
     <Canvas
       camera={{ position: [...HOME_POSITION], fov: 45, near: 0.05, far: 500 }}
       dpr={[1, 2]}
+      onCreated={({ raycaster }) => {
+        // Scene units are normalised (median camera distance = 10), so a fixed pick radius works.
+        raycaster.params.Points.threshold = 0.08;
+      }}
       gl={{ antialias: true }}
       aria-label={
         cloud
@@ -53,6 +58,7 @@ export default function ViewerScene() {
       {showAxes && <axesHelper args={[1.5]} />}
       {cloud && showCloud && <PointCloudLayer key={cloud.job_id} manifest={cloud} />}
       {path && showPath && <TrajectoryLayer manifest={path} />}
+      <MeasureLayer picks={picks} />
       {cloud && <FitToBounds bounds={cloud.bounds} />}
       <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.1} />
     </Canvas>
