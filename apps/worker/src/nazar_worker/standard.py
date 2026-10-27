@@ -38,7 +38,7 @@ from nazar_contracts import (
 )
 from nazar_worker import fast3r
 from nazar_worker.fast3r import DenseCloud, Fast3rFailed, Fast3rRuntime, run_fast3r
-from nazar_worker.ply import write_ply_arrays
+from nazar_worker.ply import ESTIMATED, OBSERVED, write_ply_arrays
 from nazar_worker.sfm import SfmFailed, SfmSettings, Snapshot, reconstruct
 from nazar_worker.stages import StageAdapter, StageContext, StageFailed
 
@@ -362,7 +362,8 @@ class Densify(_Stage):
             len(keep),
             "points",
         )
-        ply = write_ply_arrays(pts, cols, [PLY_NOTES[run.method]])
+        labels = np.where(run.observed_mask(), OBSERVED, ESTIMATED).astype(np.uint8)
+        ply = write_ply_arrays(pts, cols, [PLY_NOTES[run.method]], labels)
         ctx.publish(
             _declare(
                 run,

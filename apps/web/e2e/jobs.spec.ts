@@ -172,6 +172,7 @@ test('reconstruct builds real geometry from the sample video, progressively', as
       mean_reproj_px?: number;
     };
     coordinate_frame: { scale_status: string };
+    confidence: { observed: number; estimated: number };
   };
   expect(report.geometry_method).toBe(FAST3R ? 'fast3r' : 'sfm');
   if (FAST3R) {
@@ -183,6 +184,26 @@ test('reconstruct builds real geometry from the sample video, progressively', as
   // The report describes the cloud the viewer shows (the filtered one), not the raw output.
   expect(report.geometry.points).toBe(finalPoints);
   expect(report.coordinate_frame.scale_status).toBe('unknown');
+
+  // The final cloud carries per-point confidence classes; the legend counts match the report.
+  const toggle = page.getByRole('button', { name: 'Colour by confidence' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const legend = page.getByTestId('confidence-legend');
+  await expect(legend).toContainText(
+    `Estimated ${report.confidence.estimated.toLocaleString('en-US')}`,
+  );
+  if (report.confidence.observed > 0) {
+    await expect(legend).toContainText(
+      `Observed ${report.confidence.observed.toLocaleString('en-US')}`,
+    );
+  }
+  await page.screenshot({
+    path: testInfo.outputPath('reconstruct-confidence.png'),
+    fullPage: true,
+  });
+  await toggle.click();
+  await expect(legend).toHaveCount(0);
 
   await page.screenshot({ path: testInfo.outputPath('reconstruct-complete.png'), fullPage: true });
   expect(errors).toEqual([]);

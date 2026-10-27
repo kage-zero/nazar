@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
-from nazar_worker.ply import read_ply, write_ply, write_ply_arrays
+from nazar_worker.ply import read_confidence, read_ply, write_ply, write_ply_arrays
 from nazar_worker.sfm import (
     SfmFailed,
     SfmSettings,
@@ -28,6 +28,17 @@ def test_array_ply_matches_tuple_ply() -> None:
     tuples = [(*map(float, p), *map(int, c)) for p, c in zip(xyz, rgb, strict=True)]
     assert write_ply_arrays(xyz, rgb, ["x"]) == write_ply(tuples, ["x"])  # type: ignore[arg-type]
     assert len(read_ply(write_ply_arrays(xyz, rgb))) == 50
+    assert read_confidence(write_ply_arrays(xyz, rgb)) is None
+
+
+def test_ply_carries_optional_confidence_classes() -> None:
+    xyz = np.arange(12, dtype=np.float64).reshape(4, 3)
+    rgb = np.full((4, 3), 7, dtype=np.uint8)
+    labels = np.array([1, 2, 2, 1], dtype=np.uint8)
+    data = write_ply_arrays(xyz, rgb, confidence=labels)
+    assert b"property uchar confidence" in data
+    assert read_confidence(data).tolist() == [1, 2, 2, 1]  # type: ignore[union-attr]
+    assert read_ply(data) == read_ply(write_ply_arrays(xyz, rgb))
 
 
 def _synthetic_recon(

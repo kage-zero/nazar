@@ -15,7 +15,7 @@ from nazar_api.storage import PREFLIGHT_DIR, asset_dir
 from nazar_contracts import PipelineMode
 from nazar_media import run_preflight
 from nazar_worker.fast3r import Fast3rRuntime
-from nazar_worker.ply import read_ply
+from nazar_worker.ply import ESTIMATED, OBSERVED, read_confidence, read_ply
 from nazar_worker.runner import run_loop
 
 SAMPLE = Path(__file__).resolve().parents[3] / "docs" / "sample" / "video" / "sample1.mp4"
@@ -54,10 +54,17 @@ def run_standard(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
     return snap, report
 
 
-def cloud_points(client: TestClient, snap: dict[str, Any]) -> int:
+def cloud_points(client: TestClient, snap: dict[str, Any], report: dict[str, Any]) -> int:
+    """Point count of the final cloud, checking that its per-point confidence classes match
+    the report's counts."""
     cloud = next(a for a in snap["artifacts"] if a["kind"] == "point_cloud")
-    pts = read_ply(client.get(f"/api/artifacts/{cloud['id']}/content").content)
+    data = client.get(f"/api/artifacts/{cloud['id']}/content").content
+    pts = read_ply(data)
     assert len(pts) == cloud["point_count"]
+    labels = read_confidence(data)
+    assert labels is not None
+    assert int((labels == OBSERVED).sum()) == report["confidence"]["observed"]
+    assert int((labels == ESTIMATED).sum()) == report["confidence"]["estimated"]
     return len(pts)
 
 
@@ -73,7 +80,7 @@ def test_cpu_baseline_reconstructs_the_sample(
     assert report["geometry_method"] == "sfm"
     assert report["geometry"]["registered_keyframes"] >= 18
     assert report["geometry"]["mean_reproj_px"] < 1.5
-    assert report["geometry"]["points"] == cloud_points(app_client, snap)
+    assert report["geometry"]["points"] == cloud_points(app_client, snap, report)
     assert {a["provenance"]["producer"] for a in snap["artifacts"]} == {"nazar-worker/sfm-baseline"}
     assert "fast3r_fallback" not in {w["code"] for w in snap["warnings"]}
 
@@ -85,7 +92,7 @@ def test_fast3r_reconstructs_the_sample_densely(app_client: TestClient) -> None:
     assert report["geometry_method"] == "fast3r", geometry.get("fast3r_fallback_reason")
     assert "fast3r_fallback" not in {w["code"] for w in snap["warnings"]}
     assert geometry["placed_keyframes"] == report["input"]["keyframes"]
-    n = cloud_points(app_client, snap)
+    n = cloud_points(app_client, snap, report)
     assert n == geometry["points"] and n > 50_000  # dense, unlike the ~6k-point baseline
     assert report["resources"]["peak_vram_mib"] > 0
     assert {a["provenance"]["producer"] for a in snap["artifacts"]} == {"nazar-worker/fast3r"}

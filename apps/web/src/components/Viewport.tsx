@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { CONFIDENCE_CLASSES } from '../lib/confidence';
 import { sourceText } from '../lib/provenance';
 import { useViewerStore } from '../state/viewerStore';
 import { Button, Card, Tag } from './ui';
@@ -24,6 +25,8 @@ export function Viewport() {
   const s = useViewerStore();
   const { cloud, path, loaded } = s;
   const kindText = loaded?.kind === 'point_cloud' ? 'Final cloud' : 'Preview';
+  const confidence = loaded?.confidence ?? null;
+  const byConfidence = s.colorBy === 'confidence' && confidence !== null;
 
   return (
     <Card
@@ -58,7 +61,27 @@ export function Viewport() {
             >
               {kindText} · revision {loaded.revision} · {loaded.points.toLocaleString()} points
             </p>
-          ) : (
+          ) : null}
+          {byConfidence ? (
+            <ul
+              className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-paper"
+              aria-label="Point colours: confidence class"
+              data-testid="confidence-legend"
+            >
+              {CONFIDENCE_CLASSES.filter((c) => confidence[c.key] > 0).map((c) => (
+                <li key={c.key} className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className="inline-block size-2.5 rounded-full"
+                    style={{ backgroundColor: c.hex }}
+                  />
+                  {c.label} {confidence[c.key].toLocaleString()}
+                </li>
+              ))}
+              <li className="text-smoke">heuristic labels; rule in the job report</li>
+            </ul>
+          ) : null}
+          {loaded ? null : (
             <>
               <p className="text-lg font-medium text-paper" data-testid="viewer-empty">
                 No geometry yet.
@@ -96,6 +119,17 @@ export function Viewport() {
           {cloud && (
             <Button variant="ghost-inverted" aria-pressed={s.showCloud} onClick={s.toggleCloud}>
               Points
+            </Button>
+          )}
+          {confidence && (
+            <Button
+              variant="ghost-inverted"
+              aria-pressed={s.colorBy === 'confidence'}
+              onClick={() => {
+                s.setColorBy(s.colorBy === 'confidence' ? 'rgb' : 'confidence');
+              }}
+            >
+              Colour by confidence
             </Button>
           )}
           {path && (

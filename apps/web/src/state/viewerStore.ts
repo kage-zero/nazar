@@ -1,5 +1,6 @@
 import type { ArtifactManifest } from '@nazar/contracts';
 import { create } from 'zustand';
+import type { ConfidenceCounts } from '../lib/confidence';
 
 /**
  * Small viewer UI state only. Geometry buffers never go in here: they live in
@@ -11,13 +12,18 @@ export interface LoadedCloud {
   kind: ArtifactManifest['kind'];
   revision: number;
   points: number;
+  /** Per-class counts when the cloud carries confidence labels (final clouds), else null. */
+  confidence: ConfidenceCounts | null;
 }
+
+export type ColorBy = 'rgb' | 'confidence';
 
 interface ViewerState {
   showGrid: boolean;
   showAxes: boolean;
   showCloud: boolean;
   showPath: boolean;
+  colorBy: ColorBy;
   resetToken: number;
   fitToken: number;
   cloud: ArtifactManifest | null;
@@ -28,6 +34,7 @@ interface ViewerState {
   toggleAxes: () => void;
   toggleCloud: () => void;
   togglePath: () => void;
+  setColorBy: (colorBy: ColorBy) => void;
   requestReset: () => void;
   requestFit: () => void;
   setLayers: (cloud: ArtifactManifest | null, path: ArtifactManifest | null) => void;
@@ -40,6 +47,7 @@ export const useViewerStore = create<ViewerState>()((set) => ({
   showAxes: true,
   showCloud: true,
   showPath: true,
+  colorBy: 'rgb',
   resetToken: 0,
   fitToken: 0,
   cloud: null,
@@ -57,6 +65,9 @@ export const useViewerStore = create<ViewerState>()((set) => ({
   },
   togglePath: () => {
     set((s) => ({ showPath: !s.showPath }));
+  },
+  setColorBy: (colorBy) => {
+    set({ colorBy });
   },
   requestReset: () => {
     set((s) => ({ resetToken: s.resetToken + 1 }));

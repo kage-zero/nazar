@@ -2,9 +2,10 @@ import type { ArtifactManifest } from '@nazar/contracts';
 import { Line } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import { useEffect, useState } from 'react';
-import { Vector3, type BufferGeometry } from 'three';
+import { Float32BufferAttribute, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { jobs } from '../api/jobs';
+import { confidenceColors, countConfidence } from '../lib/confidence';
 import { useViewerStore } from '../state/viewerStore';
 
 async function fetchArtifact(id: string, signal: AbortSignal): Promise<ArrayBuffer> {
@@ -13,13 +14,21 @@ async function fetchArtifact(id: string, signal: AbortSignal): Promise<ArrayBuff
   return response.arrayBuffer();
 }
 
+interface ParsedCloud {
+  geometry: BufferGeometry;
+  rgb: BufferAttribute;
+  /** Vertex colours by confidence class, when the cloud carries the labels. */
+  byConfidence: Float32BufferAttribute | null;
+}
+
 /**
  * Renders one point-cloud artifact. A new revision replaces the geometry in place (the old
  * GPU buffer is disposed); requests for superseded revisions are aborted, so a late response
  * can never overwrite a newer cloud.
  */
 export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
-  const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+  const [cloud, setCloud] = useState<ParsedCloud | null>(null);
+  const colorBy = useViewerStore((s) => s.colorBy);
   const setLoaded = useViewerStore((s) => s.setLoaded);
   const setLayerError = useViewerStore((s) => s.setLayerError);
 
@@ -27,14 +36,24 @@ export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
     const controller = new AbortController();
     fetchArtifact(manifest.id, controller.signal)
       .then((buffer) => {
-        const parsed = new PLYLoader().parse(buffer);
-        setGeometry(parsed);
+        const loader = new PLYLoader();
+        loader.setCustomPropertyNameMapping({ confidence: ['confidence'] });
+        const parsed = loader.parse(buffer);
+        const classes = parsed.hasAttribute('confidence')
+          ? (parsed.getAttribute('confidence').array as ArrayLike<number>)
+          : null;
+        setCloud({
+          geometry: parsed,
+          rgb: parsed.getAttribute('color') as BufferAttribute,
+          byConfidence: classes ? new Float32BufferAttribute(confidenceColors(classes), 3) : null,
+        });
         setLayerError(null);
         setLoaded({
           id: manifest.id,
           kind: manifest.kind,
           revision: manifest.revision,
           points: parsed.getAttribute('position').count,
+          confidence: classes ? countConfidence(classes) : null,
         });
       })
       .catch((err: unknown) => {
@@ -48,14 +67,21 @@ export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
 
   useEffect(
     () => () => {
-      geometry?.dispose();
+      cloud?.geometry.dispose();
     },
-    [geometry],
+    [cloud],
   );
 
-  if (!geometry) return null;
+  useEffect(() => {
+    if (!cloud) return;
+    const wanted = colorBy === 'confidence' && cloud.byConfidence ? cloud.byConfidence : cloud.rgb;
+    if (cloud.geometry.getAttribute('color') !== wanted)
+      cloud.geometry.setAttribute('color', wanted);
+  }, [cloud, colorBy]);
+
+  if (!cloud) return null;
   return (
-    <points geometry={geometry}>
+    <points geometry={cloud.geometry}>
       <pointsMaterial size={0.06} sizeAttenuation vertexColors />
     </points>
   );
