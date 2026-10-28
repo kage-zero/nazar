@@ -16,6 +16,7 @@ from nazar_api.storage import PREFLIGHT_DIR, asset_dir
 from nazar_contracts import PipelineMode
 from nazar_media import run_preflight
 from nazar_worker.fast3r import Fast3rRuntime
+from nazar_worker.glb import read_glb
 from nazar_worker.las import read_las, to_las_axes
 from nazar_worker.ply import ESTIMATED, OBSERVED, read_confidence, read_ply
 from nazar_worker.runner import run_loop
@@ -68,7 +69,7 @@ def cloud_points(client: TestClient, snap: dict[str, Any], report: dict[str, Any
     assert int((labels == OBSERVED).sum()) == report["confidence"]["observed"]
     assert int((labels == ESTIMATED).sum()) == report["confidence"]["estimated"]
     # The LAS export holds the same points (axes converted to +Z up), colours and classes.
-    export = next(a for a in snap["artifacts"] if a["kind"] == "export")
+    export = next(a for a in snap["artifacts"] if a["media_type"] == "application/vnd.las")
     assert export["media_type"] == "application/vnd.las"
     las = read_las(client.get(f"/api/artifacts/{export['id']}/content").content)
     xyz = np.array([p[:3] for p in pts], dtype=np.float64)
@@ -76,6 +77,13 @@ def cloud_points(client: TestClient, snap: dict[str, Any], report: dict[str, Any
     assert (las.user_data == labels).all()
     assert las.system_id == "NAZAR local frame, no CRS"
     assert "las" in report["exports"]
+    # The GLB holds the same points and colours (glTF shares NAZAR's +Y-up axes) and the path.
+    glb = next(a for a in snap["artifacts"] if a["media_type"] == "model/gltf-binary")
+    scene = read_glb(client.get(f"/api/artifacts/{glb['id']}/content").content)
+    assert np.abs(scene.points - xyz).max() < 1e-4
+    assert (scene.colors == np.array([p[3:6] for p in pts], dtype=np.uint8)).all()
+    assert scene.path is not None and len(scene.path) >= 2
+    assert scene.doc["asset"]["extras"]["units"] == "unitless"
     return len(pts)
 
 

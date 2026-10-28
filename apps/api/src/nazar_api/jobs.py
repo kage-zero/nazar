@@ -180,7 +180,9 @@ def to_manifest(row: ArtifactRecord) -> ArtifactManifest:
 
 
 def current_artifacts(db: Session, job: JobRecord) -> list[ArtifactManifest]:
-    """Newest available revision of each kind produced by the current attempt."""
+    """Newest available revision of each kind (and media type) from the current attempt.
+    Revisions of one output replace each other (progressive previews); different formats of
+    one kind (LAS and GLB exports) are separate outputs."""
     rows = db.scalars(
         select(ArtifactRecord)
         .where(
@@ -190,9 +192,9 @@ def current_artifacts(db: Session, job: JobRecord) -> list[ArtifactManifest]:
         )
         .order_by(ArtifactRecord.kind, ArtifactRecord.revision.desc())
     ).all()
-    newest: dict[str, ArtifactRecord] = {}
+    newest: dict[tuple[str, str], ArtifactRecord] = {}
     for row in rows:
-        newest.setdefault(row.kind, row)
+        newest.setdefault((row.kind, str(row.declared.get("media_type"))), row)
     return [to_manifest(r) for r in newest.values()]
 
 

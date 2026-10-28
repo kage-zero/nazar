@@ -63,11 +63,17 @@ function fmtBytes(n: number) {
 function extension(a: ArtifactManifest) {
   if (a.media_type.includes('ply')) return 'ply';
   if (a.media_type.includes('las')) return 'las';
+  if (a.media_type.includes('gltf-binary')) return 'glb';
   return a.media_type.includes('json') ? 'json' : 'bin';
 }
 
+const EXPORT_NAMES: Partial<Record<string, string>> = {
+  las: 'Point cloud (LAS)',
+  glb: 'Point cloud + camera path (GLB)',
+};
+
 function outputName(a: ArtifactManifest) {
-  return a.kind === 'export' && extension(a) === 'las' ? 'Point cloud (LAS)' : KIND_TEXT[a.kind];
+  return (a.kind === 'export' ? EXPORT_NAMES[extension(a)] : undefined) ?? KIND_TEXT[a.kind];
 }
 
 function Inventory({ artifacts }: { artifacts: ArtifactManifest[] }) {

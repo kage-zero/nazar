@@ -40,6 +40,7 @@ from nazar_media.telemetry import track_from_json
 from nazar_worker import fast3r
 from nazar_worker.fast3r import DenseCloud, Fast3rFailed, Fast3rRuntime, run_fast3r
 from nazar_worker.georef import Alignment, align
+from nazar_worker.glb import write_glb
 from nazar_worker.las import write_las
 from nazar_worker.ply import ESTIMATED, OBSERVED, write_ply_arrays
 from nazar_worker.sfm import SfmFailed, SfmSettings, Snapshot, reconstruct
@@ -724,9 +725,43 @@ class Exporting(_Stage):
             ),
             las,
         )
+        # glTF assumes metres and +Y up (NAZAR's axes): scale applies only when it is known.
+        mpu = run.frame().metres_per_unit
+        k = mpu or 1.0
+        glb = write_glb(
+            pts * k,
+            cols,
+            run.centres() * k,
+            extras={
+                "units": "metre" if mpu else "unitless",
+                "scale_status": run.frame().scale_status.value,
+                "frame": "local_reconstruction, +Y up",
+                "note": "Point cloud and camera path from NAZAR; see the processing report.",
+            },
+        )
+        ctx.publish(
+            _declare(
+                run,
+                "export-glb",
+                ArtifactKind.EXPORT,
+                "model/gltf-binary",
+                glb,
+                xyz=pts,
+                frames=_frames(run, run.placed()),
+                final=True,
+            ),
+            glb,
+        )
         report["exports"] = {
             "las": f"{las_note} Classification 1 (unclassified); user data = confidence class "
             "(1 observed, 2 estimated).",
+            "glb": "glTF 2.0 binary: the final cloud as POINTS (COLOR_0 sRGB) and the camera path "
+            "as a LINE_STRIP, +Y up. "
+            + (
+                "Coordinates in metres (GNSS scale), local frame."
+                if mpu
+                else "Coordinates unitless (unknown scale), although glTF viewers assume metres."
+            ),
         }
         content = json.dumps(report, indent=2).encode()
         ctx.publish(

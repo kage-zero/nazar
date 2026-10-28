@@ -17,6 +17,7 @@ from test_missions import upload
 from test_standard_pipeline import SAMPLE, sample_mission
 
 from nazar_contracts import PipelineMode
+from nazar_worker.glb import read_glb
 from nazar_worker.las import read_las
 from nazar_worker.runner import run_loop
 
@@ -99,7 +100,7 @@ def test_matching_telemetry_gives_metric_scale(
     assert math.isclose(cloud["frame"]["metres_per_unit"], al["metres_per_unit"], rel_tol=1e-4)
     assert "scale_from_gnss" in {w["code"] for w in snap["warnings"]}
     assert "scale_unknown" not in {w["code"] for w in snap["warnings"]}
-    export = next(a for a in snap["artifacts"] if a["kind"] == "export")
+    export = next(a for a in snap["artifacts"] if a["media_type"] == "application/vnd.las")
     las = read_las(app_client.get(f"/api/artifacts/{export['id']}/content").content)
     assert las.system_id == "NAZAR local frame m, no CRS"
     # Metres: the exported cloud's extent is SCALE times its local extent.
@@ -107,6 +108,13 @@ def test_matching_telemetry_gives_metric_scale(
     las_extent = np.asarray(las.bounds_max) - np.asarray(las.bounds_min)
     assert math.isclose(
         float(np.linalg.norm(las_extent)), SCALE * float(np.linalg.norm(local)), rel_tol=0.05
+    )
+    glb = next(a for a in snap["artifacts"] if a["media_type"] == "model/gltf-binary")
+    scene = read_glb(app_client.get(f"/api/artifacts/{glb['id']}/content").content)
+    assert scene.doc["asset"]["extras"]["units"] == "metre"
+    glb_extent = scene.points.max(axis=0) - scene.points.min(axis=0)
+    assert math.isclose(
+        float(np.linalg.norm(glb_extent)), SCALE * float(np.linalg.norm(local)), rel_tol=0.05
     )
 
 

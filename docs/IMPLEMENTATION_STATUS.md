@@ -108,9 +108,25 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 - **Formats:** only the SRT layouts and CSV columns above. Other drone logs (e.g. `.DAT`, `.txt` flight records, GPX) are not read.
 - **Before validation:** a telemetry file attached before its video is validated shows "coverage known once the video is validated" until then.
 
+### Added after the report: GLB export (same night)
+
+- **Writer.** `apps/worker/src/nazar_worker/glb.py` writes glTF 2.0 binary with numpy only:
+  - the final cloud as a POINTS primitive (POSITION float32 with min/max, COLOR_0 normalised RGBA);
+  - the camera path as a LINE_STRIP;
+  - +Y up, the same axes as NAZAR.
+- **Units.** Coordinates are in metres when a GNSS scale was accepted, and unitless otherwise. `asset.extras.units` says which, because glTF viewers assume metres.
+- **Job outputs.** Every Reconstruct job now publishes `export-glb` ("Point cloud + camera path (GLB)") next to the LAS.
+  - The job snapshot used to keep one artifact per *kind*, so a second export hid the first. It now keys on kind and media type. Previews still replace each other.
+- **Verified.**
+  - Spec layout and round-trip tests (3 new worker tests).
+  - The pipeline tests check that the GLB matches the PLY points and colours, on both CPU and Fast3R (the Fast3R test was run on this laptop's GPU), and that it is in metres with a GNSS scale.
+  - three.js's own `GLTFLoader` (already installed for the viewer) parsed a generated file: a `Points` node with 500 coloured points, a `Line` node, the bounds, and the extras.
+  - `pnpm check`: 15 of 15 tasks. E2E: 25 passed, 2 skipped.
+- **Not verified.** No desktop glTF viewer was opened. See B12.
+
 ### Next step
 
-Run B11 with a real DJI clip and its SRT. Then add a projected CRS (UTM through PyProj, once vetted) to the LAS export when orientation is accepted. After that, GLB export.
+Run B11 with a real DJI clip and its SRT. Then add a projected CRS (UTM through PyProj, once vetted) to the LAS export when orientation is accepted.
 
 ## Milestone 3 report — Fast3R GPU geometry (2026-10-27, Windows 11 laptop, RTX 4050 Laptop 6 GB)
 
@@ -358,7 +374,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 0. **Your checks:** [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
 2. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
-3. **Telemetry with real data** (B11), then a projected CRS for georeferenced LAS, then GLB export.
+3. **Telemetry with real data** (B11), then a projected CRS for georeferenced LAS.
 
 ## Resume instructions
 

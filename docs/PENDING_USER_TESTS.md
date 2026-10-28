@@ -74,6 +74,10 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
   4. Measure something of known size, such as a car (≈ 4.5 m) or a football pitch, and tell me the number.
   5. If the telemetry is *not applied*, the warning says why. Send me that text.
   - _Why it needs you:_ every test so far uses synthetic telemetry. It proves the maths, not real GNSS accuracy or DJI's SRT clock sync.
+- [ ] **B12. GLB export.** After a Reconstruct job, download **Point cloud + camera path (GLB)**. Open it at https://gltf-viewer.donmccurdy.com/, in Windows 3D Viewer, or in Blender (File → Import → glTF).
+  - Expected: the coloured cloud plus a thin line for the camera path, upright (+Y up).
+  - Without telemetry the coordinates are unitless, so the viewer's "metres" are not real metres.
+  - _Why it needs you:_ the file passed three.js's own glTF loader and our spec checks, but no desktop viewer was opened.
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make
