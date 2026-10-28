@@ -2589,6 +2589,18 @@
           "default": null,
           "description": "Geometry backend for standard jobs on this worker (absent: not reported)."
         },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lease only this queued job (offline bundle import); absent: oldest first."
+        },
         "modes": {
           "items": {
             "$ref": "#/$defs/PipelineMode"

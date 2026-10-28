@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -28,6 +28,18 @@ from nazar_contracts import (
 
 Transport = Callable[[str, str, bytes | None, dict[str, str]], tuple[int, bytes]]
 """(method, url, body, headers) -> (status, body). Swappable so tests can run in-process."""
+
+
+class WorkerApi(Protocol):
+    """What the job runner needs from the API. `WorkerClient` speaks HTTP; the offline
+    `BundleClient` (bundle.py) reads inputs from a mission bundle and records the outputs."""
+
+    def heartbeat(self, job_id: str) -> WorkerHeartbeat: ...
+    def events(self, job_id: str, events: list[WorkerEvent]) -> WorkerEventAck: ...
+    def preflight(self, job_id: str) -> dict[str, Any]: ...
+    def keyframe(self, job_id: str, image: int) -> bytes: ...
+    def telemetry(self, job_id: str) -> dict[str, Any] | None: ...
+    def publish(self, job_id: str, declared: ArtifactCreate, content: bytes) -> ArtifactCreated: ...
 
 
 class LeaseLost(Exception):
@@ -114,9 +126,12 @@ class WorkerClient:
         worker_id: str,
         modes: list[PipelineMode],
         geometry: GeometryBackend | None = None,
+        job_id: str | None = None,
     ) -> WorkerLease | None:
         self.lease_id = None
-        body = WorkerLeaseRequest(worker_id=worker_id, modes=modes, geometry=geometry)
+        body = WorkerLeaseRequest(
+            worker_id=worker_id, modes=modes, geometry=geometry, job_id=job_id
+        )
         got = self._json("POST", "/api/worker/lease", body)
         if got is None:
             return None

@@ -13,7 +13,7 @@ they are at college, then work through it step by step with them._
   `docs/IMPLEMENTATION_STATUS.md` + ADR-0003.
 
 **Before leaving home**
-- [ ] Laptop charged; repo up to date (`git log --oneline -1` should show `04d28b9` or newer).
+- [ ] Laptop charged; repo up to date (`git log --oneline -1` should show the bundle-mode commit or newer).
 - [ ] Decide how code gets into the VDI: `git clone` (needs network, step 3) or a zip of the
       repo on a USB drive / SyncHPC storage. Make the zip without `var/`, `.env`,
       `node_modules`, `.venv`: `git archive -o nazar.zip HEAD`.
@@ -55,8 +55,15 @@ uv run nazar-worker stages
 - [ ] Only if step 3 showed outbound HTTPS works. Options to decide with Claude: laptop via a
       tunnel, a small cloud VM, or the college network. **No tunnel is opened without your
       explicit OK.**
-- If outbound is blocked: bundle mode (copy a mission in, run, copy results out). Claude builds
-  that path after this session.
+- If outbound is blocked: **bundle mode** (built 2026-10-28, ADR-0003). Prepare at home: start
+  the API, create a mission with sample1, press Reconstruct, stop any online worker, then
+  `uv run nazar-worker bundle export --out mission.zip` (needs `NAZAR_WORKER_TOKEN` in `.env`).
+  Put `mission.zip` on the USB drive with the repo zip. At college:
+  ```bash
+  uv run nazar-worker bundle run mission.zip --out result.zip   # no network, no token
+  ```
+  Bring `result.zip` home; then `uv run nazar-worker bundle import result.zip` with the API
+  running. The job page fills in with the college run's stages and timings.
 
 ## 6. Fast3R on the college GPU (only if 1–4 passed)
 ```bash
@@ -70,6 +77,8 @@ uv run python scripts/setup_fast3r.py --check  # must end with "Fast3R runtime O
 - [ ] One measured run on the sample video (no other jobs):
   - online mode: run `uv run nazar-worker run --api <API URL>` with `NAZAR_WORKER_TOKEN` set in
     the shell (type it yourself; never paste it in chat), then press Reconstruct on the laptop;
+  - bundle mode: `bundle run` as in step 5 (the result's `geometry` field says fast3r or
+    cpu-baseline; stage durations are in the report after import);
   - record: geometry stage time, first preview time, passes, peak VRAM — compare with the laptop
     table in `docs/research/model-selection.md` (sample1: 13.8 s, 4 passes, 3,149 MiB;
     sample2: 50.5 s, 15 passes).

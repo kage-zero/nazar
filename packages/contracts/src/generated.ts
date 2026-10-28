@@ -1021,6 +1021,10 @@ export interface WorkerLeaseRequest {
    */
   geometry?: GeometryBackend | null;
   /**
+   * Lease only this queued job (offline bundle import); absent: oldest first.
+   */
+  job_id?: string | null;
+  /**
    * @minItems 1
    */
   modes: [PipelineMode, ...PipelineMode[]];

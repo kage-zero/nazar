@@ -93,7 +93,7 @@ def lease(
 ) -> WorkerLease | Response:
     if body.geometry is not None:
         request.app.state.worker_geometry = body.geometry
-    got = lease_next(db, body.worker_id, body.modes, settings.worker_lease_seconds)
+    got = lease_next(db, body.worker_id, body.modes, settings.worker_lease_seconds, body.job_id)
     if got is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     job = got.job

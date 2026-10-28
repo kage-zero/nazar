@@ -9,7 +9,8 @@ from pathlib import Path
 
 from nazar_contracts import PipelineMode
 from nazar_worker import __version__
-from nazar_worker.client import WorkerClient
+from nazar_worker.bundle import BundleError, export_bundle, import_result, run_bundle
+from nazar_worker.client import ApiCallFailed, WorkerClient
 from nazar_worker.doctor import collect
 from nazar_worker.fast3r import Fast3rRuntime
 from nazar_worker.runner import run_loop
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--poll", type=float, default=2.0, help="Seconds between empty polls.")
     run.add_argument("--heartbeat", type=float, default=10.0, help="Lease renewal interval (s).")
     run.add_argument("--once", action="store_true", help="Handle at most one job, then exit.")
+    _bundle_parser(sub)
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -95,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"{plan.stage.value:22} {kind:9} M{plan.milestone:<3} {state:16} {plan.component}"
             )
         return 0
+    if args.command == "bundle":
+        return _bundle(args)
 
     try:
         modes = [PipelineMode(m.strip()) for m in args.modes.split(",") if m.strip()]
@@ -130,6 +134,69 @@ def main(argv: list[str] | None = None) -> int:
         )
     except KeyboardInterrupt:
         return 130
+    return 0
+
+
+def _bundle_parser(sub: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    bundle = sub.add_parser(
+        "bundle", help="Offline mode for a GPU machine that cannot reach the API (ADR-0003)."
+    )
+    steps = bundle.add_subparsers(dest="step", required=True)
+    exp = steps.add_parser("export", help="(online) Lease a queued job; save its inputs to a zip.")
+    exp.add_argument("--out", type=Path, required=True, help="Mission bundle to write (.zip).")
+    exp.add_argument("--job", default=None, help="Job id (default: the oldest queued job).")
+    exp.add_argument("--modes", default="standard", help="Pipelines to accept: test, standard.")
+    run = steps.add_parser("run", help="(offline) Process a mission bundle; no network or token.")
+    run.add_argument("bundle", type=Path, help="Mission bundle from `bundle export`.")
+    run.add_argument("--out", type=Path, required=True, help="Result bundle to write (.zip).")
+    run.add_argument("--step-delay", type=float, default=0.0, help="Test pipeline pacing (s).")
+    imp = steps.add_parser("import", help="(online) Send a result bundle to the API.")
+    imp.add_argument("result", type=Path, help="Result bundle from `bundle run`.")
+    for step in (exp, run, imp):
+        step.add_argument("--env-file", type=Path, default=Path(".env"))
+        step.add_argument("--worker-id", default=_default_worker_id())
+    for step in (exp, imp):
+        step.add_argument(
+            "--api", default=os.environ.get("NAZAR_API_BASE_URL", "http://127.0.0.1:8000")
+        )
+
+
+def _bundle(args: argparse.Namespace) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if args.step == "run":
+        _load_fast3r_settings(args.env_file)
+        try:
+            outcome = run_bundle(args.bundle, args.out, args.worker_id, args.step_delay)
+        except BundleError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(f"Job {outcome}. Result bundle: {args.out}")
+        return 0 if outcome == "completed" else 1
+    token = _token(args.env_file)
+    if token is None:
+        print(
+            f"{TOKEN_VAR} is not set (environment or --env-file). Nothing was sent.",
+            file=sys.stderr,
+        )
+        return 2
+    client = WorkerClient(args.api, token)
+    try:
+        if args.step == "export":
+            modes = [PipelineMode(m.strip()) for m in args.modes.split(",") if m.strip()]
+            lease = export_bundle(client, args.worker_id, args.out, modes, args.job)
+            if lease is None:
+                print("No queued job to export.", file=sys.stderr)
+                return 1
+            print(
+                f"Exported job {lease.job_id} ({lease.keyframe_count} keyframes) to {args.out}. "
+                "It stays queued: do not run an online worker until you import the result."
+            )
+            return 0
+        outcome = import_result(client, args.result, args.worker_id)
+    except (BundleError, ApiCallFailed, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"Imported: job {outcome}.")
     return 0
 
 

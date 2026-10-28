@@ -305,20 +305,23 @@ class Lease:
 
 
 def lease_next(
-    db: Session, worker_id: str, modes: list[PipelineMode], seconds: int
+    db: Session,
+    worker_id: str,
+    modes: list[PipelineMode],
+    seconds: int,
+    job_id: str | None = None,
 ) -> Lease | None:
+    """Lease the oldest matching queued job, or only `job_id` when given (bundle import)."""
     expire_leases(db)
-    candidates = db.scalars(
-        select(JobRecord)
-        .where(
-            JobRecord.status == JobStatus.QUEUED,
-            JobRecord.lease_id.is_(None),
-            JobRecord.cancel_requested.is_(False),
-            JobRecord.pipeline.in_([m.value for m in modes]),
-        )
-        .order_by(JobRecord.created_at)
-        .limit(5)
-    ).all()
+    query = select(JobRecord).where(
+        JobRecord.status == JobStatus.QUEUED,
+        JobRecord.lease_id.is_(None),
+        JobRecord.cancel_requested.is_(False),
+        JobRecord.pipeline.in_([m.value for m in modes]),
+    )
+    if job_id is not None:
+        query = query.where(JobRecord.id == job_id)
+    candidates = db.scalars(query.order_by(JobRecord.created_at).limit(5)).all()
     for job in candidates:
         lease_id = secrets.token_urlsafe(24)
         result = db.execute(

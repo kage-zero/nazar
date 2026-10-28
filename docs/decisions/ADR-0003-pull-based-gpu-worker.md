@@ -1,6 +1,6 @@
 # ADR-0003: GPU worker pulls jobs from the API over outbound HTTPS
 
-- **Status:** Accepted; protocol implemented in Milestone 4 (2026-10-27) and exercised locally by the test pipeline. Still needs verification on the college VDI (Milestone 1) and a choice between online and bundle mode.
+- **Status:** Accepted; protocol implemented in Milestone 4 (2026-10-27) and exercised locally by the test pipeline. Bundle mode implemented 2026-10-28. Still needs verification on the college VDI (Milestone 1) and a choice between online and bundle mode.
 
 ## Context
 
@@ -27,5 +27,10 @@ Celery remains an option for CPU-side tasks co-located with the API. It is not t
 ## Consequences / open questions (Milestone 1)
 
 - **API reachability:** the API must be reachable _from_ the VDI, either by public HTTPS or by the API running inside the same network. This must be verified with a read-only port/HTTP test.
-- **Fallback:** if no outbound route exists, use a manual protocol. The user runs the worker on a mission bundle copied into the VDI, then uploads the result bundle via SyncHPC Storage or another approved channel. The bundle format will equal the artifact contract, so both paths share code.
+- **Fallback (implemented 2026-10-28, `nazar_worker/bundle.py`):** if no outbound route exists, use bundle mode. Both paths run the same `JobRun` and stage code:
+  1. `nazar-worker bundle export --out mission.zip` (next to the API) leases a queued job and saves its inputs. It sends no event, so the lease lapses after 60 s and the job is simply queued again, without using an attempt.
+  2. Copy the zip into the VDI (SyncHPC Storage, USB). `nazar-worker bundle run mission.zip --out result.zip` needs no network and no token. A `BundleClient` stands in for the API and records every event and artifact in order.
+  3. Copy `result.zip` back. `nazar-worker bundle import result.zip` leases that job by id (new optional `job_id` on the lease request) and replays the recording through the normal worker routes, so the API validates it like a live worker. Artifacts are checksum-verified before anything is sent; a result made from a different video is refused.
+  - Neither zip contains the worker token or a live lease id. Stage durations are the real offline ones; event times are the import time, and the job shows an `offline_bundle` info warning saying so.
+  - While a bundle is out, the job stays queued: an online worker started meanwhile would take it, and the import is then refused.
 - **Persistence:** the only copy of results must never be left in VDI temp storage.

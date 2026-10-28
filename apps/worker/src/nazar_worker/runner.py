@@ -22,7 +22,7 @@ from nazar_contracts import (
     WorkerEvent,
     WorkerLease,
 )
-from nazar_worker.client import ApiCallFailed, LeaseLost, WorkerClient
+from nazar_worker.client import ApiCallFailed, LeaseLost, WorkerApi, WorkerClient
 from nazar_worker.fast3r import Fast3rRuntime
 from nazar_worker.stages import (
     Cancelled,
@@ -44,7 +44,7 @@ def adapters_for(mode: PipelineMode, step_s: float) -> dict[StageName, StageAdap
 class _Heartbeat(threading.Thread):
     """Renews the lease in the background and records cancel requests / lease loss."""
 
-    def __init__(self, client: WorkerClient, job_id: str, interval_s: float) -> None:
+    def __init__(self, client: WorkerApi, job_id: str, interval_s: float) -> None:
         super().__init__(daemon=True, name="nazar-heartbeat")
         self.client, self.job_id, self.interval_s = client, job_id, interval_s
         self.cancel = threading.Event()
@@ -69,7 +69,7 @@ class _Heartbeat(threading.Thread):
 class JobRun:
     def __init__(
         self,
-        client: WorkerClient,
+        client: WorkerApi,
         lease: WorkerLease,
         adapters: dict[StageName, StageAdapter],
         heartbeat_s: float,

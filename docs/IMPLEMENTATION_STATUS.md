@@ -279,6 +279,29 @@ There is no ground truth for the sample, so absolute accuracy is **not measured*
 2. Write a Fast3R adapter for the `geometry` stage behind the same contract. The CPU baseline stays as the fallback.
 3. Meanwhile, on CPU: telemetry import, measurement tools and confidence colouring in the viewer.
 
+## Offline bundle mode (2026-10-28)
+
+### Implemented
+- `nazar-worker bundle export | run | import` (`apps/worker/src/nazar_worker/bundle.py`). ADR-0003's fallback for a VDI with no route to the API. Flow and safeguards are in the ADR.
+- Contract: optional `job_id` on `WorkerLeaseRequest`; the API's `lease_next` leases only that job when it is given.
+- `WorkerApi` protocol: `JobRun` runs unchanged against the HTTP client or the offline `BundleClient`.
+
+### Verified
+- `apps/api/tests/test_bundle.py` (4 tests, in-process API):
+  - test-pipeline round trip: job completes on attempt 1 with the same artifacts as an online run, ordered events, real stage durations and the `offline_bundle` warning; a second import is refused;
+  - import refused while the export lease is held, and for a result from a different video;
+  - a corrupted artifact is refused before any event is sent; the job stays queued;
+  - REAL DATA: sample1 through the actual CLI `bundle run` (CPU baseline), imported with LAS and GLB exports.
+- `pnpm check`: 15 of 15 tasks (API 48 passed, 1 skipped).
+
+### Known limitations
+- Not yet run on the college VDI (todoCollege.md step 5/6).
+- No live preview while offline; the whole job appears at import.
+- If an import is interrupted, wait for its lease to lapse (60 s) and import again; it then counts as attempt 2.
+
+### Next step
+Use it at college if outbound HTTPS is blocked (A3).
+
 ## Georeferenced LAS in UTM (2026-10-28)
 
 ### Implemented

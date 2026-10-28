@@ -98,6 +98,10 @@ class WorkerLeaseRequest(_Model):
         default=None,
         description="Geometry backend for standard jobs on this worker (absent: not reported).",
     )
+    job_id: str | None = Field(
+        default=None,
+        description="Lease only this queued job (offline bundle import); absent: oldest first.",
+    )
 
 
 class WorkerLease(_Model):
