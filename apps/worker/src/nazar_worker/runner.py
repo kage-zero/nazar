@@ -125,6 +125,11 @@ class JobRun:
         def keyframe(image: int) -> bytes:
             return self.client.keyframe(self.lease.job_id, image)
 
+        def telemetry() -> dict[str, Any] | None:
+            if self.lease.telemetry_asset_id is None:
+                return None
+            return self.client.telemetry(self.lease.job_id)
+
         return StageContext(
             lease=self.lease,
             progress=progress,
@@ -133,6 +138,7 @@ class JobRun:
             preflight=preflight,
             keyframe=keyframe,
             check_cancel=self.check_cancel,
+            telemetry=telemetry,
         )
 
     def execute(self) -> str:

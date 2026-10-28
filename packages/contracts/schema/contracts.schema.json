@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "AltitudeKind": {
+      "description": "Altitudes keep their meaning: height above take-off is not sea-level or ellipsoidal.",
+      "enum": [
+        "relative_to_takeoff",
+        "absolute_unspecified_datum",
+        "none"
+      ],
+      "title": "AltitudeKind",
+      "type": "string"
+    },
     "AnalysisInfo": {
       "properties": {
         "decode_errors": {
@@ -620,6 +630,18 @@
           ],
           "default": null,
           "description": "EPSG/WKT identifier when georeferenced."
+        },
+        "metres_per_unit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Metres per coordinate unit when scale comes from a sensor alignment while coordinates stay in the local frame; null when scale is unknown or units are metres."
         },
         "scale_status": {
           "$ref": "#/$defs/ScaleStatus"
@@ -1315,6 +1337,17 @@
         },
         "name": {
           "type": "string"
+        },
+        "telemetry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Asset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "video": {
           "anyOf": [
@@ -2060,6 +2093,121 @@
       "title": "StageState",
       "type": "object"
     },
+    "TelemetrySummary": {
+      "description": "Computed from the normalised track. Times are seconds since the video started.",
+      "properties": {
+        "altitude_kind": {
+          "$ref": "#/$defs/AltitudeKind"
+        },
+        "dropped": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Rejected samples by reason.",
+          "type": "object"
+        },
+        "end_s": {
+          "type": "number"
+        },
+        "findings": {
+          "description": "Plain-language notes on limits of this telemetry.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "format": {
+          "description": "dji_srt, airdata_csv or csv.",
+          "type": "string"
+        },
+        "gaps": {
+          "description": "Pauses longer than 1.5 s; never interpolated.",
+          "items": {
+            "$ref": "#/$defs/TimeGap"
+          },
+          "type": "array"
+        },
+        "height_range_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "horizontal_extent_m": {
+          "description": "Largest horizontal distance from the first position (via WGS84 ENU).",
+          "type": "number"
+        },
+        "rate_hz": {
+          "description": "Median sample rate.",
+          "type": "number"
+        },
+        "samples": {
+          "type": "integer"
+        },
+        "start_s": {
+          "type": "number"
+        },
+        "video_coverage": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fraction of the video's duration covered by samples outside gaps."
+        },
+        "video_duration_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "From the video's preflight; null until the video is validated."
+        }
+      },
+      "required": [
+        "format",
+        "samples",
+        "start_s",
+        "end_s",
+        "rate_hz",
+        "altitude_kind",
+        "horizontal_extent_m",
+        "height_range_m",
+        "gaps",
+        "dropped",
+        "video_duration_s",
+        "video_coverage",
+        "findings"
+      ],
+      "title": "TelemetrySummary",
+      "type": "object"
+    },
+    "TimeGap": {
+      "properties": {
+        "end_s": {
+          "type": "number"
+        },
+        "start_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "start_s",
+        "end_s"
+      ],
+      "title": "TimeGap",
+      "type": "object"
+    },
     "UserPublic": {
       "properties": {
         "email": {
@@ -2393,6 +2541,18 @@
         "pipeline": {
           "$ref": "#/$defs/PipelineMode"
         },
+        "telemetry_asset_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Accepted telemetry pinned when the job was created; fetch it from `inputs/telemetry`."
+        },
         "video_asset_id": {
           "type": "string"
         },
@@ -2563,6 +2723,9 @@
     "stage_name": {
       "$ref": "#/$defs/StageName"
     },
+    "telemetry_summary": {
+      "$ref": "#/$defs/TelemetrySummary"
+    },
     "worker_event_ack": {
       "$ref": "#/$defs/WorkerEventAck"
     },
@@ -2594,6 +2757,7 @@
     "asset",
     "asset_create",
     "preflight_report",
+    "telemetry_summary",
     "job",
     "artifact_create",
     "artifact_created",

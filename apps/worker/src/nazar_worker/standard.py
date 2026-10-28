@@ -36,8 +36,10 @@ from nazar_contracts import (
     StageName,
     WorkerLease,
 )
+from nazar_media.telemetry import track_from_json
 from nazar_worker import fast3r
 from nazar_worker.fast3r import DenseCloud, Fast3rFailed, Fast3rRuntime, run_fast3r
+from nazar_worker.georef import Alignment, align
 from nazar_worker.las import write_las
 from nazar_worker.ply import ESTIMATED, OBSERVED, write_ply_arrays
 from nazar_worker.sfm import SfmFailed, SfmSettings, Snapshot, reconstruct
@@ -94,6 +96,11 @@ class _Run:
     images: list[npt.NDArray[np.uint8]] = field(default_factory=list)
     keyframe_index: list[int] = field(default_factory=list)
     """Source video frame index of each keyframe image."""
+    keyframe_times: list[float] = field(default_factory=list)
+    """Video time (s) of each keyframe image."""
+    telemetry: dict[str, Any] | None = None
+    """What the sensor stage was given, for the report (None: no telemetry stage ran)."""
+    alignment: Alignment | None = None
     method: str = SFM
     fallback_reason: str | None = None
     snapshot: Snapshot | None = None
@@ -107,6 +114,23 @@ class _Run:
     timings: dict[str, float] = field(default_factory=dict)
     first_preview_s: float | None = None
     started: float = field(default_factory=time.monotonic)
+
+    def frame(self) -> CoordinateFrame:
+        """Coordinates stay local; an accepted sensor alignment adds a metric scale."""
+        if self.alignment is None or not self.alignment.scale_accepted:
+            return LOCAL_FRAME
+        return CoordinateFrame(
+            type=FrameType.LOCAL_RECONSTRUCTION,
+            units="unitless",
+            scale_status=ScaleStatus.METRIC_SENSOR,
+            metres_per_unit=self.alignment.metres_per_unit,
+        )
+
+    def centres(self) -> npt.NDArray[np.float64]:
+        if self.dense is not None:
+            return self.dense.centers
+        assert self.snapshot is not None
+        return self.snapshot.centers
 
     # The final geometry, whichever method produced it.
     def points(self) -> npt.NDArray[np.float64]:
@@ -152,7 +176,7 @@ def _declare(
         media_type=media_type,
         byte_size=len(content),
         checksum_sha256=hashlib.sha256(content).hexdigest(),
-        frame=LOCAL_FRAME if spatial or xyz is not None else None,
+        frame=run.frame() if spatial or xyz is not None else None,
         bounds=box,
         point_count=len(xyz) if xyz is not None else None,
         lod=lod,
@@ -196,6 +220,7 @@ class Preprocessing(_Stage):
                 raise StageFailed(f"Keyframe {kf['image']} could not be decoded.")
             self.run_state.images.append(img.astype(np.uint8))
             self.run_state.keyframe_index.append(int(kf["index"]))
+            self.run_state.keyframe_times.append(float(kf["t"]))
             if n % 8 == 0 or n == len(keyframes):
                 ctx.progress("Loaded keyframes from preflight", n, len(keyframes), "keyframes")
         self.run_state.timings["preprocessing_s"] = round(time.monotonic() - t0, 3)
@@ -342,6 +367,69 @@ class Geometry(_Stage):
         )
 
 
+class SensorOptimization(_Stage):
+    """Similarity alignment of the camera path to GNSS telemetry (see georef.py). Accepted
+    claims add a metric scale (and an ENU georeference for exports); rejected ones keep the
+    local frame, with the reason in the report. GTSAM pose-graph fusion is not used: one
+    Sim(3) is the honest model for a single video with consumer GNSS."""
+
+    def skip_reason(self, lease: WorkerLease) -> str | None:
+        return None if lease.telemetry_asset_id else "No telemetry was supplied with this mission."
+
+    def run(self, ctx: StageContext) -> None:
+        run = self.run_state
+        t0 = time.monotonic()
+        doc = ctx.telemetry()
+        if doc is None:
+            run.telemetry = {
+                "applied": False,
+                "reason": "Telemetry was removed after the job "
+                "was created; the reconstruction stays local.",
+            }
+            ctx.warn("telemetry_removed", run.telemetry["reason"], "warning")
+            return
+        track = track_from_json(doc)
+        placed = run.placed()
+        times = np.array([run.keyframe_times[i] for i in placed])
+        ctx.progress(
+            f"Aligning {len(placed)} camera positions to {len(track)} GNSS samples",
+            None,
+            None,
+            None,
+        )
+        result = align(run.centres(), times, track)
+        run.alignment = result
+        run.telemetry = {
+            "applied": result.scale_accepted,
+            "format": track.format,
+            "samples": len(track),
+            "altitude_kind": track.altitude_kind.value,
+            "dropped_samples": track.dropped,
+            "gaps": len(track.gaps),
+            "enu_origin": {
+                "latitude": round(float(track.lat[0]), 7),
+                "longitude": round(float(track.lon[0]), 7),
+                "height_m": None if np.isnan(track.alt[0]) else round(float(track.alt[0]), 2),
+                "height_kind": track.altitude_kind.value,
+                "note": "First valid telemetry fix; ENU = east, north, up metres from it.",
+            },
+            **result.report(),
+        }
+        if result.scale_accepted:
+            ctx.progress(
+                f"Scale from GNSS: 1 unit = {result.metres_per_unit:.3f} m "
+                f"(residual {result.residual_rms_m:.1f} m RMS over {result.used} keyframes)",
+                result.used,
+                len(placed),
+                "keyframes",
+            )
+        else:
+            ctx.progress(
+                "Telemetry not applied: " + " ".join(result.reasons), 0, len(placed), "keyframes"
+            )
+        run.timings["sensor_optimization_s"] = round(time.monotonic() - t0, 3)
+
+
 class Densify(_Stage):
     """Statistical outlier removal on the final cloud, published with the camera path. For
     Fast3R the cloud is already dense (pointmaps, voxel-averaged); for the baseline it is the
@@ -397,6 +485,7 @@ class Densify(_Stage):
             {
                 "frame": "local_reconstruction",
                 "units": "unitless",
+                "metres_per_unit": run.frame().metres_per_unit,
                 "note": f"{source}, same frame as the cloud.",
                 "focal_px_estimated": round(focal, 2),
                 "poses": poses,
@@ -438,12 +527,29 @@ class Analysis(_Stage):
             len(observed),
             "points",
         )
-        ctx.warn(
-            "scale_unknown",
-            "Video only: distances are relative (unitless). Absolute size, height and "
-            "geographic position are unknown without telemetry or a known reference length.",
-            "warning",
-        )
+        al = run.alignment
+        if al is not None and al.scale_accepted:
+            ctx.warn(
+                "scale_from_gnss",
+                f"Scale comes from GNSS telemetry (1 unit = {al.metres_per_unit:.3f} m, residual "
+                f"{al.residual_rms_m:.1f} m RMS, approx. +/-"
+                f"{100 * (al.scale_uncertainty_rel or 0):.1f}% from fit noise alone). Consumer "
+                "GNSS errors and clock sync limit it; treat distances as estimates.",
+                "info",
+            )
+            if not al.orientation_accepted:
+                ctx.warn("not_georeferenced", " ".join(al.reasons), "info")
+        else:
+            tail = (
+                "distances are relative (unitless). Absolute size, height and geographic "
+                "position are unknown without usable telemetry or a known reference length."
+            )
+            message = (
+                f"Video only: {tail}"
+                if al is None
+                else f"Telemetry was supplied but not applied. {' '.join(al.reasons)} So {tail}"
+            )
+            ctx.warn("scale_unknown", message, "warning")
         if run.method == FAST3R:
             ctx.warn(
                 "learned_geometry",
@@ -531,7 +637,7 @@ class Exporting(_Stage):
                 "scenes without a ground plane.",
             ]
             surface = "A sparse cloud cannot support a meaningful surface."
-        report = {
+        report: dict[str, Any] = {
             "schema": "nazar.processing-report/1",
             "generated_at": datetime.now(UTC).isoformat(),
             "job_id": ctx.lease.job_id,
@@ -541,7 +647,7 @@ class Exporting(_Stage):
             "input": {
                 "video_sha256": ctx.lease.video_sha256,
                 "keyframes": len(run.images),
-                "telemetry": None,
+                "telemetry": run.telemetry,
                 "image_size": list(run.images[0].shape[1::-1]) if run.images else None,
             },
             "geometry": geometry,
@@ -555,7 +661,8 @@ class Exporting(_Stage):
                 "type": "local_reconstruction",
                 "axes": "right-handed, +Y up (estimated from the dominant plane), -Z forward",
                 "units": "unitless",
-                "scale_status": "unknown",
+                "scale_status": run.frame().scale_status.value,
+                "metres_per_unit": run.frame().metres_per_unit,
                 "normalisation": "median camera distance from the scene centre = 10 units",
             },
             "timings_s": {**run.timings, "first_preview_s": run.first_preview_s},
@@ -568,9 +675,42 @@ class Exporting(_Stage):
             },
             "limitations": limitations,
         }
+        if run.telemetry is not None:
+            del report["skipped"]["sensor_optimization"]
+            report["sensor_alignment"] = report["input"].pop("telemetry")
+            report["input"]["telemetry"] = True
+            if run.frame().scale_status is ScaleStatus.METRIC_SENSOR:
+                limitations[1] = (
+                    "Scale comes from consumer GNSS; distances are estimates (see "
+                    "sensor_alignment)."
+                )
         assert run.final is not None
         pts, cols, labels = run.final
-        las = write_las(pts, cols, labels)
+        al = run.alignment
+        if al is not None and al.orientation_accepted:
+            las = write_las(
+                al.to_enu(pts), cols, labels, enu=True, system_id=b"NAZAR local ENU m, no CRS"
+            )
+            las_note = (
+                "LAS 1.2, point format 2 (RGB). East-north-up metres from the ENU origin in "
+                "sensor_alignment (WGS84 tangent plane); no CRS VLR. Height datum: "
+                f"{run.telemetry and run.telemetry['altitude_kind']}."
+            )
+        elif al is not None and al.scale_accepted:
+            assert al.metres_per_unit is not None
+            las = write_las(
+                pts * al.metres_per_unit, cols, labels, system_id=b"NAZAR local frame m, no CRS"
+            )
+            las_note = (
+                "LAS 1.2, point format 2 (RGB). Local frame in metres (GNSS scale), not "
+                "georeferenced. Axes converted to +Z up: LAS (X, Y, Z) = NAZAR (x, -z, y)."
+            )
+        else:
+            las = write_las(pts, cols, labels)
+            las_note = (
+                "LAS 1.2, point format 2 (RGB). No CRS: local frame, unknown scale. Axes "
+                "converted to +Z up: LAS (X, Y, Z) = NAZAR (x, -z, y)."
+            )
         ctx.publish(
             _declare(
                 run,
@@ -585,9 +725,8 @@ class Exporting(_Stage):
             las,
         )
         report["exports"] = {
-            "las": "LAS 1.2, point format 2 (RGB). No CRS: local frame, unknown scale. Axes "
-            "converted to +Z up: LAS (X, Y, Z) = NAZAR (x, -z, y). Classification 1 "
-            "(unclassified); user data = confidence class (1 observed, 2 estimated).",
+            "las": f"{las_note} Classification 1 (unclassified); user data = confidence class "
+            "(1 observed, 2 estimated).",
         }
         content = json.dumps(report, indent=2).encode()
         ctx.publish(
@@ -618,7 +757,7 @@ def build_standard_pipeline(
         StageName.GEOMETRY: Geometry(run),
         StageName.DEPTH_PRIORS: Skip("Metric3D-v2 is not installed on this worker."),
         StageName.DYNAMIC_ANALYSIS: Skip("YOLO + SAM2 are not installed on this worker."),
-        StageName.SENSOR_OPTIMIZATION: Skip("No telemetry was supplied with this mission."),
+        StageName.SENSOR_OPTIMIZATION: SensorOptimization(run),
         StageName.DENSE_RECONSTRUCTION: Densify(run),
         StageName.SURFACE_PROCESSING: _SurfaceSkip(run),
         StageName.ANALYSIS: Analysis(run),

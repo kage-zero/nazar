@@ -366,6 +366,7 @@ version = "0.1.0"
 source = { editable = "apps/worker" }
 dependencies = [
     { name = "nazar-contracts" },
+    { name = "nazar-media" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "scipy" },
@@ -374,6 +375,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "nazar-contracts", editable = "packages/contracts" },
+    { name = "nazar-media", editable = "packages/media" },
     { name = "numpy", specifier = ">=2.3" },
     { name = "opencv-python-headless", specifier = ">=5.0,<6" },
     { name = "scipy", specifier = ">=1.16" },

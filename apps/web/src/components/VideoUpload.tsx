@@ -300,14 +300,6 @@ export function VideoUpload({ mission, onChange }: { mission: Mission; onChange:
           )}
         </div>
       )}
-
-      <div className="flex flex-col gap-1 rounded-card-sm bg-mist p-4">
-        <span className="mono-label text-slate">Telemetry &amp; calibration · optional</span>
-        <span className="text-sm text-slate">
-          Video-only reconstruction stays in a local frame with unknown scale. Telemetry import is
-          not built yet.
-        </span>
-      </div>
     </div>
   );
 }

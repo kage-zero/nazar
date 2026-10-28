@@ -84,3 +84,4 @@ class Mission(BaseModel):
     name: str
     created_at: datetime
     video: Asset | None
+    telemetry: Asset | None = None

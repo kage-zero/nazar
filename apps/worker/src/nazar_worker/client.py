@@ -144,6 +144,18 @@ class WorkerClient:
         _, data = self._request("GET", f"/api/worker/jobs/{job_id}/inputs/keyframes/{image}.jpg")
         return data
 
+    def telemetry(self, job_id: str) -> dict[str, Any] | None:
+        """The job's normalised telemetry track, or None if it was removed after job creation."""
+        try:
+            result: dict[str, Any] = self._json(
+                "GET", f"/api/worker/jobs/{job_id}/inputs/telemetry"
+            )
+        except ApiCallFailed as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return result
+
     def publish(self, job_id: str, declared: ArtifactCreate, content: bytes) -> ArtifactCreated:
         created = ArtifactCreated.model_validate(
             self._json("POST", f"/api/worker/jobs/{job_id}/artifacts", declared)

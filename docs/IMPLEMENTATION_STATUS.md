@@ -1,12 +1,14 @@
 # Implementation status
 
-_Last updated: 2026-10-27_
+_Last updated: 2026-10-28_
 
 ## Current milestone: **Milestone 3 (GPU) — Fast3R dense geometry, with the CPU baseline as the visible fallback**
 
 **Reconstruct** now runs **Fast3R** on the GPU when the worker has the Fast3R runtime set up (`pnpm gpu:setup`; this laptop's RTX 4050 is set up). Otherwise it runs the classical CPU structure-from-motion baseline. Either way the result is in a local frame with unknown scale, and the job, every artifact and the viewer say which method ran. If Fast3R fails on a job, the job still completes with the CPU baseline and a visible `fast3r_fallback` warning that gives the reason.
 
 The other GPU models from the brief (Metric3D-v2 scale, InstantSplat, YOLO + SAM2) are **not** integrated. The college GPU (Milestone 1) has not been accessed. The synthetic test pipeline still exists for plumbing checks and stays labelled as synthetic.
+
+**Optional telemetry** (DJI SRT / CSV) can now be attached to a mission. When the camera path matches the GPS track well enough, the result gets a metric scale from GNSS; otherwise it stays local and says why. See the telemetry report below.
 
 Checks that need you (college GPU, sound and vibration, phone, decisions) are listed in [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 
@@ -30,6 +32,85 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 | Worker | `doctor`, `stages`, and **`run`**: lease → heartbeat thread → stages → events/artifacts, with cancel, lost-lease and failure handling. Stage adapters skip with a reason. `test` = synthetic plumbing pipeline. **`standard` = CPU SfM baseline** (see the Milestone 3 report). Unusable input fails the job with a plain, non-retryable reason (`StageFailed`). |
 | Jobs (Milestone 4) | Contracts: `job.queued`, job/stage snapshot, worker lease/heartbeat/event/artifact models. API: jobs, append-only event log with atomic `seq` and idempotency keys, state machine, lease sweeper, worker routes (bearer token + lease header), artifact declare/upload with size+SHA-256 checks, WebSocket stream with REST catch-up, cancel/retry. Web: live job panel, stage table, outputs with downloads, completion sound/vibration (once per watched job, user toggles), point-cloud and camera-path layers with in-place revision swaps, fit/toggles, frame/units labels, mission kept in the URL. Readiness `worker` check is now real (last contact within 60 s). |
 | Docs | Research (sample facts corrected; preflight results), architecture (ingestion flow), environment setup (env:init, operator account), README. |
+
+## Telemetry import and GNSS scale (2026-10-28, Windows 11 laptop, CPU only)
+
+### Implemented
+
+- **Parser and validator** (`packages/media/python/nazar_media/telemetry.py`). It reads text only; nothing is executed or fetched.
+  - **DJI SRT**, three layouts:
+    - `[latitude: ..] [longitude: ..] [rel_alt: .. abs_alt: ..]` (Mini / Air);
+    - Mavic 2's `[latitude : ..] [longtitude : ..] [altitude: ..]`;
+    - Phantom's `GPS(lon,lat,alt) BAROMETER:..` (longitude first).
+  - **Airdata CSV**: uses `isVideo` to find the video start, and converts feet to metres.
+  - **Plain CSV**: `time_s`, `latitude`, `longitude`, plus optional `rel_alt_m` / `alt_m`.
+  - **Normalisation:**
+    - time becomes seconds from the video start;
+    - the altitude keeps its kind: *above take-off*, *datum not stated* or *none*, and is never presented as sea-level height;
+    - lat/lon go to east-north-up (ENU) metres through WGS84 ECEF, never treated as metres.
+  - **Dropped and counted, never repaired:** samples with no fix (0, 0), out-of-range values, non-increasing times, and jumps faster than 45 m/s.
+  - **Gaps** over 1.5 s are listed. Positions are interpolated only *within* a gap-free span.
+- **API.**
+  - `POST /missions/{id}/assets` with `kind: telemetry`: `.srt`/`.csv`, up to 20 MB, one per mission.
+  - The upload goes through the same resumable chunked route as video. It is validated as soon as the last byte arrives: either `ready`, or `rejected` with a plain reason.
+  - `GET /assets/{id}/telemetry` returns a `TelemetrySummary`: samples, rate, span, extent, height range, gaps, dropped samples, video coverage (once the video is validated) and plain-language findings.
+  - A job pins the mission's accepted telemetry when it is created (migration `0003`). The worker fetches it from `inputs/telemetry`. If it was removed in the meantime, the job records that and stays local.
+- **Worker `sensor_optimization` stage** (`apps/worker/src/nazar_worker/georef.py`).
+  - A Umeyama Sim(3) fit maps the placed keyframes' camera centres to the GNSS positions at their video times. It searches a ±2 s clock offset in 0.1 s steps, with a small preference for zero, then drops gross outliers once and refits.
+  - Two separate claims:
+    - **Scale** needs ≥ 5 matched keyframes, ≥ 50 % of placed keyframes matched, a baseline ≥ 20 m, and RMS residual ≤ max(3 m, 5 % of baseline).
+    - **Orientation** (an ENU georeference) additionally needs altitude, and a path that is not close to a straight line (planarity ≥ 0.15). Otherwise rotation about the line is undetermined.
+  - Results:
+    - Scale accepted: final artifacts keep their local coordinates, and their frame says `scale_status: metric_sensor` with `metres_per_unit`.
+    - The LAS export is written in metres. It uses ENU axes from the first fix when orientation was also accepted, and local axes otherwise. The system id says which.
+    - The report gains a `sensor_alignment` section: every number, the thresholds, the ENU origin, and the reasons any claim was rejected.
+    - Rejected: the frame stays `unknown`, and the `scale_unknown` warning says the telemetry was supplied but not applied, and why.
+  - GTSAM pose-graph fusion is **not** used. One similarity transform is the honest model for one video with consumer GNSS. The stage label now says "Sim(3) GNSS alignment".
+- **Web.**
+  - A "Flight telemetry · optional" box in the mission panel: attach, see the summary and findings, remove. Rejected files show their reason.
+  - Measure reads "… m (GNSS scale, estimate)" when the frame has a sensor scale.
+  - The viewer's Units row shows "1 unit = N m, metric (sensor)".
+
+### Verified
+
+- `pnpm check`: 15 of 15 tasks pass.
+
+  | Package | Result |
+  |---|---|
+  | media | 30 passed (17 new telemetry tests) |
+  | worker | 27 passed (7 new alignment tests) |
+  | API | 44 passed, 1 skipped (Fast3R, environment-gated) |
+  | web | 33 passed |
+
+- Full E2E: 25 passed, 2 skipped. Attach, summarise, remove and reject telemetry now run on desktop and mobile.
+- **Through the real pipeline** (`apps/api/tests/test_sensor_pipeline.py`, CPU baseline on `sample1.mp4`):
+  - A synthetic track built from the job's own camera path at 10 m/unit was recovered as **10.024 m/unit** (0.24 %).
+  - The pipeline correctly **refused to georeference**: sample1's camera moves along a short, nearly straight arc (planarity < 0.15).
+  - The LAS came out in local metres, with an extent 10× the local one.
+  - A hovering track (span < 20 m) was reported but not applied, and the frame stayed `unknown`.
+- **Unit tests on synthetic tracks:**
+  - An orbit with 1.5 m GNSS noise gives scale within 3 % plus a georeference.
+  - A 0.8 s clock offset is found within 0.1 s.
+  - Straight-line flight gives scale only.
+  - Rejected: a hover, telemetry from another flight, telemetry with no altitude, and telemetry with no time overlap.
+  - ENU checked against known geodesy: 0.001° of latitude at 41.89° N ≈ 111.07 m, and 0.001° of longitude ≈ 82.9 m.
+
+### Performance-accuracy evidence
+
+- **No real flight log was supplied,** so every accuracy figure above comes from **synthetic** telemetry and is labelled so in the tests. It shows the maths and the acceptance rules work. It says nothing about real DJI GNSS accuracy or SRT clock sync. That needs B11.
+- The alignment itself costs well under a second: 41 offsets × one SVD on ≤ 96 keyframes.
+
+### Known limitations
+
+- **Scale quality** is bounded by consumer GNSS (a few metres) and by how far the drone flew. The reported `scale_uncertainty_rel_approx` counts fit noise only, not GNSS bias or the time-sync error that remains after the offset search.
+- **The cloud stays in its local frame,** with metres-per-unit metadata. Only the LAS export is converted to metres or ENU. No CRS or GeoKey VLR is written yet, so GIS tools see local ENU metres, not a projected CRS.
+- **No altitude** (lat/lon only): no alignment is attempted. A horizontal-only fit would need a known up axis.
+- **Formats:** only the SRT layouts and CSV columns above. Other drone logs (e.g. `.DAT`, `.txt` flight records, GPX) are not read.
+- **Before validation:** a telemetry file attached before its video is validated shows "coverage known once the video is validated" until then.
+
+### Next step
+
+Run B11 with a real DJI clip and its SRT. Then add a projected CRS (UTM through PyProj, once vetted) to the LAS export when orientation is accepted. After that, GLB export.
 
 ## Milestone 3 report — Fast3R GPU geometry (2026-10-27, Windows 11 laptop, RTX 4050 Laptop 6 GB)
 
@@ -262,7 +343,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 
 ## Known gaps and warnings
 
-- **Telemetry import** (CSV / DJI SRT) is not built. The API answers "not supported yet", and the UI says so.
+- **Telemetry** is tested on synthetic tracks and on synthetic telemetry through the real pipeline only. No real flight log has been tried yet (B11).
 - **Under load, E2E timing grows.** Several Chromium instances with software WebGL plus server-side decoding starved the laptop at default parallelism (false timeouts). Local workers are capped at 3; the validation tests have explicit time budgets.
 - **Preflight thresholds** were calibrated on the two supplied clips only. Treat them as hypotheses for other footage.
 - **Validation runs in the API process** (one background thread). This is fine for one operator. GPU work will use the pull-based worker (ADR-0003).
@@ -276,9 +357,8 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 
 0. **Your checks:** [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
-2. **Milestone 2 remainder:** optional telemetry import (CSV, DJI SRT) attached to a mission, with a time-alignment check against video timestamps.
-3. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
-4. **Telemetry import** (DJI SRT / CSV), which would turn relative measurements into metric ones.
+2. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
+3. **Telemetry with real data** (B11), then a projected CRS for georeferenced LAS, then GLB export.
 
 ## Resume instructions
 

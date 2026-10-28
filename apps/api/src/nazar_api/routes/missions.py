@@ -1,5 +1,6 @@
 """Missions and their input assets: resumable chunked upload, validation, preflight."""
 
+import json
 import os
 from pathlib import Path
 
@@ -27,11 +28,24 @@ from nazar_contracts import (
     MissionCreate,
     PreflightReport,
     ProcessingProgress,
+    TelemetrySummary,
+)
+from nazar_media.telemetry import (
+    MAX_BYTES as TELEMETRY_MAX_BYTES,
+)
+from nazar_media.telemetry import (
+    TelemetryError,
+    parse_telemetry,
+    summarize,
+    track_from_json,
+    track_to_json,
 )
 
 router = APIRouter(prefix="/api", tags=["missions"])
 
 ACTIVE_VIDEO = (AssetStatus.UPLOADING, AssetStatus.VALIDATING, AssetStatus.READY)
+TELEMETRY_TRACK = "track.json"
+TELEMETRY_EXTENSIONS = (".srt", ".csv")
 
 
 def to_asset(row: AssetRecord) -> Asset:
@@ -52,11 +66,15 @@ def to_asset(row: AssetRecord) -> Asset:
 
 
 def _current_video(db: Session, mission_id: str) -> AssetRecord | None:
+    return _current(db, mission_id, AssetKind.VIDEO)
+
+
+def _current(db: Session, mission_id: str, kind: AssetKind) -> AssetRecord | None:
     return db.scalars(
         select(AssetRecord)
         .where(
             AssetRecord.mission_id == mission_id,
-            AssetRecord.kind == AssetKind.VIDEO,
+            AssetRecord.kind == kind,
             AssetRecord.status != AssetStatus.CANCELLED,
         )
         .order_by(AssetRecord.created_at.desc())
@@ -66,11 +84,13 @@ def _current_video(db: Session, mission_id: str) -> AssetRecord | None:
 
 def to_mission(db: Session, row: MissionRecord) -> Mission:
     video = _current_video(db, row.id)
+    telemetry = _current(db, row.id, AssetKind.TELEMETRY)
     return Mission(
         id=row.id,
         name=row.name,
         created_at=row.created_at,
         video=to_asset(video) if video else None,
+        telemetry=to_asset(telemetry) if telemetry else None,
     )
 
 
@@ -127,10 +147,8 @@ def create_asset(
 ) -> Asset:
     """Register an upload. The client then sends the bytes in chunks to `/content`."""
     mission = _owned_mission(db, user, mission_id)
-    if body.kind is not AssetKind.VIDEO:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "Telemetry import is not supported yet."
-        )
+    if body.kind is AssetKind.TELEMETRY:
+        return _create_telemetry(db, mission, body, settings)
     ext = video_extension(body.filename)
     if ext is None:
         raise HTTPException(
@@ -161,6 +179,72 @@ def create_asset(
     db.commit()
     asset_dir(settings, mission.id, row.id).mkdir(parents=True, exist_ok=True)
     return to_asset(row)
+
+
+def _create_telemetry(
+    db: Session, mission: MissionRecord, body: AssetCreate, settings: SettingsDep
+) -> Asset:
+    ext = Path(body.filename).suffix.lower()
+    if ext not in TELEMETRY_EXTENSIONS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Unsupported telemetry file. Upload a DJI .SRT subtitle file or a .CSV flight log.",
+        )
+    if body.byte_size > TELEMETRY_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            f"Telemetry files are limited to {TELEMETRY_MAX_BYTES // 2**20} MB.",
+        )
+    existing = _current(db, mission.id, AssetKind.TELEMETRY)
+    if existing is not None and existing.status in ACTIVE_VIDEO:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This mission already has telemetry. Remove it first."
+        )
+    row = AssetRecord(
+        mission_id=mission.id,
+        kind=AssetKind.TELEMETRY,
+        filename=Path(body.filename).name[:255],
+        stored_name=f"source{ext}",
+        byte_size=body.byte_size,
+        received_bytes=0,
+        status=AssetStatus.UPLOADING,
+    )
+    db.add(row)
+    db.commit()
+    asset_dir(settings, mission.id, row.id).mkdir(parents=True, exist_ok=True)
+    return to_asset(row)
+
+
+def _validate_telemetry(row: AssetRecord, source: Path) -> None:
+    """Small text files: parsed in the request, so the result is known when the upload ends."""
+    try:
+        track = parse_telemetry(row.filename, source.read_bytes())
+    except TelemetryError as exc:
+        row.status, row.error = AssetStatus.REJECTED, str(exc)
+        return
+    (source.parent / TELEMETRY_TRACK).write_text(json.dumps(track_to_json(track)))
+    row.status, row.error, row.progress = AssetStatus.READY, None, None
+
+
+def video_duration_s(settings: SettingsDep, video: AssetRecord | None) -> float | None:
+    if video is None or video.status != AssetStatus.READY:
+        return None
+    path = asset_dir(settings, video.mission_id, video.id) / PREFLIGHT_DIR / "preflight.json"
+    if not path.is_file():
+        return None
+    return float(PreflightReport.model_validate_json(path.read_text()).probe.duration_s)
+
+
+@router.get("/assets/{asset_id}/telemetry", response_model=TelemetrySummary)
+def get_telemetry(
+    asset_id: str, user: UserDep, db: DbDep, settings: SettingsDep
+) -> TelemetrySummary:
+    row = _owned_asset(db, user, asset_id)
+    path = asset_dir(settings, row.mission_id, row.id) / TELEMETRY_TRACK
+    if row.kind != AssetKind.TELEMETRY or row.status != AssetStatus.READY or not path.is_file():
+        raise HTTPException(status.HTTP_409_CONFLICT, "No accepted telemetry for this file.")
+    track = track_from_json(json.loads(path.read_text()))
+    return summarize(track, video_duration_s(settings, _current_video(db, row.mission_id)))
 
 
 @router.get("/assets/{asset_id}", response_model=Asset)
@@ -210,8 +294,11 @@ async def upload_chunk(
         source = folder / row.stored_name
         os.replace(part, source)
         row.sha256 = sha256_file(source)
-        row.status = AssetStatus.VALIDATING
-        row.progress = {"phase": "queued", "completed": None, "total": None}
+        if row.kind == AssetKind.TELEMETRY:
+            _validate_telemetry(row, source)
+        else:
+            row.status = AssetStatus.VALIDATING
+            row.progress = {"phase": "queued", "completed": None, "total": None}
     db.commit()
     if row.status == AssetStatus.VALIDATING:
         request.app.state.processor.submit(row.id)

@@ -32,7 +32,9 @@ STAGE_PLAN: tuple[StagePlan, ...] = (
     StagePlan(StageName.GEOMETRY, "Fast3R (GPU); CPU baseline: OpenCV SfM", 3, optional=False),
     StagePlan(StageName.DEPTH_PRIORS, "Metric3D-v2", 5, optional=True),
     StagePlan(StageName.DYNAMIC_ANALYSIS, "YOLO + SAM2", 6, optional=True),
-    StagePlan(StageName.SENSOR_OPTIMIZATION, "GTSAM (telemetry only)", 5, optional=True),
+    StagePlan(
+        StageName.SENSOR_OPTIMIZATION, "Sim(3) GNSS alignment (telemetry only)", 5, optional=True
+    ),
     StagePlan(
         StageName.DENSE_RECONSTRUCTION, "Open3D + InstantSplat; CPU: filtered sparse", 7, False
     ),
@@ -67,6 +69,8 @@ class StageContext:
     keyframe: Callable[[int], bytes]
     """JPEG bytes of a preflight keyframe, by its 1-based image number."""
     check_cancel: Callable[[], None]
+    telemetry: Callable[[], dict[str, Any] | None] = lambda: None
+    """The job's normalised telemetry track, or None (not supplied, or removed since)."""
 
 
 class StageAdapter(Protocol):

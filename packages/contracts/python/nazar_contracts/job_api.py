@@ -110,6 +110,11 @@ class WorkerLease(_Model):
     video_asset_id: str
     keyframe_count: int = Field(ge=0)
     video_sha256: str
+    telemetry_asset_id: str | None = Field(
+        default=None,
+        description="Accepted telemetry pinned when the job was created; fetch it from "
+        "`inputs/telemetry`.",
+    )
 
 
 class WorkerHeartbeat(_Model):

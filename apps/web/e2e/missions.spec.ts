@@ -77,3 +77,35 @@ test.describe('signed out', () => {
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   });
 });
+
+test('flight telemetry can be attached, summarised and removed', async ({ page }) => {
+  // SYNTHETIC: a hand-written file in the DJI SRT layout (no real flight log was supplied).
+  const cues = Array.from({ length: 12 }, (_, i) => {
+    const t = `00:00:${String(i).padStart(2, '0')},000 --> 00:00:${String(i).padStart(2, '0')},033`;
+    const lat = (41.89021 + i * 0.00009).toFixed(6);
+    return `${i + 1}\n${t}\n[latitude: ${lat}] [longitude: 12.492231] [rel_alt: ${50 + i}.000 abs_alt: 98.5]\n`;
+  });
+  await createMission(page, 'With telemetry');
+  const box = page.getByTestId('telemetry');
+  await box.getByLabel('Telemetry file').setInputFiles({
+    name: 'DJI_0001.SRT',
+    mimeType: 'text/plain',
+    buffer: Buffer.from(cues.join('\n')),
+  });
+  const summary = page.getByTestId('telemetry-summary');
+  await expect(summary).toContainText('12 positions at 1 Hz');
+  await expect(summary).toContainText('altitude above take-off');
+  await expect(summary).toContainText('not sea-level');
+  await expect(box).toContainText('Accepted');
+
+  await box.getByRole('button', { name: 'Remove telemetry' }).click();
+  await expect(box.getByLabel('Telemetry file')).toBeAttached();
+
+  await box.getByLabel('Telemetry file').setInputFiles({
+    name: 'log.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('time_s,latitude,longitude\n0,41.89,12.49\n'),
+  });
+  await expect(box.getByRole('alert')).toContainText('Fewer than two valid GPS positions');
+  await expect(box).toContainText('Rejected');
+});

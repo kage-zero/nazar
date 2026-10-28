@@ -52,6 +52,11 @@ class CoordinateFrame(_Model):
     scale_status: ScaleStatus
     crs: str | None = Field(default=None, description="EPSG/WKT identifier when georeferenced.")
     vertical_datum: str | None = None
+    metres_per_unit: float | None = Field(
+        default=None,
+        description="Metres per coordinate unit when scale comes from a sensor alignment while "
+        "coordinates stay in the local frame; null when scale is unknown or units are metres.",
+    )
     axes: str = Field(
         default="right-handed; +X right, +Y up, -Z forward (OpenGL camera convention)",
         description="Axis convention of stored coordinates.",

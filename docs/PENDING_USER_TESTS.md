@@ -64,6 +64,16 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
      - The confidence class is in the "user data" field.
   - _Why it needs you:_ the LAS writer is checked against the ASPRS 1.2 byte offsets and by a round trip, but no third-party LAS reader could be downloaded tonight (network timeout).
 - [ ] **B10. Measure.** Press **Measure**, click a point on the cloud, then another. Expected: white markers, a white segment, and "Distance: … units (relative; scale unknown)". A third click starts a new measurement. Check that picking feels accurate (it snaps to the nearest point within a small radius).
+- [ ] **B11. Real flight telemetry.** _(Needs a clip from your own drone; the supplied samples have no flight log.)_
+  1. Record a short DJI clip with **video subtitles (SRT) turned on**. Fly an arc or circle at least 30 m across, not a straight line.
+  2. Create a mission, upload the `.MP4`, and attach the matching `.SRT` in "Flight telemetry · optional".
+     - Expected: "Accepted", the right number of positions, "altitude above take-off", and coverage near 100 %.
+  3. Press **Reconstruct**.
+     - Expected: the job's warnings include `scale_from_gnss`; the viewer's Units row reads "1 unit = … m"; Measure shows metres.
+     - Open the report's `sensor_alignment`: `residual_rms_m` should be a few metres, and `time_offset_s` near 0.
+  4. Measure something of known size, such as a car (≈ 4.5 m) or a football pitch, and tell me the number.
+  5. If the telemetry is *not applied*, the warning says why. Send me that text.
+  - _Why it needs you:_ every test so far uses synthetic telemetry. It proves the maths, not real GNSS accuracy or DJI's SRT clock sync.
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make

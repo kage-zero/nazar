@@ -8,6 +8,8 @@ requires-python = ">=3.12,<3.13"
 # docs/decisions/ADR-0004-isolated-model-environments.md.
 dependencies = [
   "nazar-contracts",
+  # Telemetry parsing and ENU conversion (pure numpy).
+  "nazar-media",
   # Classical CPU geometry baseline (SIFT + essential matrix + PnP + bundle adjustment).
   "numpy>=2.3",
   "opencv-python-headless>=5.0,<6",

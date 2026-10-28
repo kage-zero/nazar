@@ -32,7 +32,7 @@ export function Viewport() {
   const measureText = !s.measuring
     ? null
     : a && b
-      ? `Distance: ${distanceText(distance(a, b), cloud?.frame?.scale_status)}`
+      ? `Distance: ${distanceText(distance(a, b), cloud?.frame)}`
       : a
         ? 'Click a second point.'
         : 'Click a point in the cloud to start measuring.';
@@ -128,7 +128,9 @@ export function Viewport() {
             <dt className="text-smoke uppercase">Units</dt>
             <dd>
               {cloud?.frame
-                ? `${cloud.frame.units}, ${SCALE_TEXT[cloud.frame.scale_status]}`
+                ? cloud.frame.metres_per_unit
+                  ? `1 unit = ${cloud.frame.metres_per_unit.toFixed(2)} m, ${SCALE_TEXT[cloud.frame.scale_status]}`
+                  : `${cloud.frame.units}, ${SCALE_TEXT[cloud.frame.scale_status]}`
                 : 'Unknown'}
             </dd>
           </div>

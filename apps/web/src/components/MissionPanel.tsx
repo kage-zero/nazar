@@ -2,6 +2,7 @@ import type { Mission } from '@nazar/contracts';
 import { useId, useState, type SyntheticEvent } from 'react';
 import { ApiError } from '../api/client';
 import { Button, Card, Tag } from './ui';
+import { TelemetryUpload } from './TelemetryUpload';
 import { VideoUpload } from './VideoUpload';
 
 const STATUS_TAG: Record<string, string> = {
@@ -142,7 +143,10 @@ export function MissionPanel({
 
       <div className="mt-6 flex flex-col gap-6">
         {selected ? (
-          <VideoUpload key={selected.id} mission={selected} onChange={onChange} />
+          <>
+            <VideoUpload key={selected.id} mission={selected} onChange={onChange} />
+            <TelemetryUpload key={`t-${selected.id}`} mission={selected} onChange={onChange} />
+          </>
         ) : (
           <p className="text-slate">
             A mission holds one drone video and everything NAZAR derives from it.

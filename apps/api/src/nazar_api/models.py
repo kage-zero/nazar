@@ -88,6 +88,9 @@ class JobRecord(Base):
         ForeignKey("missions.id", ondelete="CASCADE"), index=True
     )
     video_asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"))
+    # Pinned at creation. No FK: removing the telemetry must not delete or block the job;
+    # the worker is told it is gone and records that.
+    telemetry_asset_id: Mapped[str | None] = mapped_column(String(32), default=None)
     pipeline: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(24), index=True)
     attempt: Mapped[int] = mapped_column(Integer, default=1)

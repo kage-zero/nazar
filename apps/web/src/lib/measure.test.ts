@@ -7,9 +7,15 @@ describe('measure', () => {
   });
 
   it('labels unknown-scale distances as relative, never metres', () => {
-    expect(distanceText(4.321, 'unknown')).toBe('4.32 units (relative; scale unknown)');
+    expect(distanceText(4.321, { scale_status: 'unknown' })).toBe(
+      '4.32 units (relative; scale unknown)',
+    );
     expect(distanceText(12.34, undefined)).toBe('12.3 units (relative; scale unknown)');
-    expect(distanceText(2, 'metric_estimated')).toBe('2.00 m (estimated scale)');
+    expect(distanceText(2, { scale_status: 'metric_estimated' })).toBe('2.00 m (estimated scale)');
+    // GNSS-scaled local frame: local units times metres per unit.
+    expect(distanceText(2, { scale_status: 'metric_sensor', metres_per_unit: 10.02 })).toBe(
+      '20.0 m (GNSS scale, estimate)',
+    );
   });
 
   it('keeps at most two picks and restarts on the third', () => {

@@ -75,9 +75,17 @@ def create_job(mission_id: str, body: JobCreate, user: UserDep, db: DbDep) -> Jo
     ).first()
     if active is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "This mission already has a running job.")
+    telemetry = db.scalars(
+        select(AssetRecord.id).where(
+            AssetRecord.mission_id == mission.id,
+            AssetRecord.kind == AssetKind.TELEMETRY,
+            AssetRecord.status == AssetStatus.READY,
+        )
+    ).first()
     job = JobRecord(
         mission_id=mission.id,
         video_asset_id=video.id,
+        telemetry_asset_id=telemetry,
         pipeline=body.pipeline.value,
         status=JobStatus.CREATED.value,
         attempt=1,

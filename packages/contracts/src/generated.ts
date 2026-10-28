@@ -146,6 +146,13 @@ export type WarningSeverity = 'info' | 'warning' | 'blocking';
  */
 export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' | 'not_implemented';
 /**
+ * Altitudes keep their meaning: height above take-off is not sea-level or ellipsoidal.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "AltitudeKind".
+ */
+export type AltitudeKind = 'relative_to_takeoff' | 'absolute_unspecified_datum' | 'none';
+/**
  * What a worker's standard pipeline would use for geometry right now.
  *
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -174,6 +181,7 @@ export interface NazarContracts {
   preflight_report: PreflightReport;
   readiness: ReadinessResponse;
   stage_name: StageName;
+  telemetry_summary: TelemetrySummary;
   worker_event_ack: WorkerEventAck;
   worker_event_batch: WorkerEventBatch;
   worker_heartbeat: WorkerHeartbeat;
@@ -255,6 +263,10 @@ export interface CoordinateFrame {
    * EPSG/WKT identifier when georeferenced.
    */
   crs?: string | null;
+  /**
+   * Metres per coordinate unit when scale comes from a sensor alignment while coordinates stay in the local frame; null when scale is unknown or units are metres.
+   */
+  metres_per_unit?: number | null;
   scale_status: ScaleStatus;
   type: FrameType;
   /**
@@ -739,6 +751,7 @@ export interface Mission {
   created_at: string;
   id: string;
   name: string;
+  telemetry?: Asset | null;
   video: Asset | null;
 }
 /**
@@ -877,6 +890,61 @@ export interface ReadinessCheck {
   status: CheckStatus;
 }
 /**
+ * Computed from the normalised track. Times are seconds since the video started.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "TelemetrySummary".
+ */
+export interface TelemetrySummary {
+  altitude_kind: AltitudeKind;
+  /**
+   * Rejected samples by reason.
+   */
+  dropped: {
+    [k: string]: number;
+  };
+  end_s: number;
+  /**
+   * Plain-language notes on limits of this telemetry.
+   */
+  findings: string[];
+  /**
+   * dji_srt, airdata_csv or csv.
+   */
+  format: string;
+  /**
+   * Pauses longer than 1.5 s; never interpolated.
+   */
+  gaps: TimeGap[];
+  height_range_m: number | null;
+  /**
+   * Largest horizontal distance from the first position (via WGS84 ENU).
+   */
+  horizontal_extent_m: number;
+  /**
+   * Median sample rate.
+   */
+  rate_hz: number;
+  samples: number;
+  start_s: number;
+  /**
+   * Fraction of the video's duration covered by samples outside gaps.
+   */
+  video_coverage: number | null;
+  /**
+   * From the video's preflight; null until the video is validated.
+   */
+  video_duration_s: number | null;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "TimeGap".
+ */
+export interface TimeGap {
+  end_s: number;
+  start_s: number;
+}
+/**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "WorkerEventAck".
  */
@@ -936,6 +1004,10 @@ export interface WorkerLease {
   lease_id: string;
   mission_id: string;
   pipeline: PipelineMode;
+  /**
+   * Accepted telemetry pinned when the job was created; fetch it from `inputs/telemetry`.
+   */
+  telemetry_asset_id?: string | null;
   video_asset_id: string;
   video_sha256: string;
 }

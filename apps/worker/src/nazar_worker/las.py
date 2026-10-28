@@ -59,8 +59,12 @@ def write_las(
     confidence: npt.NDArray[np.uint8] | None = None,
     *,
     created: datetime | None = None,
+    enu: bool = False,
+    system_id: bytes = SYSTEM_ID,
 ) -> bytes:
-    pts = to_las_axes(np.asarray(xyz, dtype=np.float64))
+    """`enu=True`: `xyz` is already east-north-up (LAS axes); otherwise it is NAZAR (+Y up)."""
+    xyz = np.asarray(xyz, dtype=np.float64)
+    pts = xyz if enu else to_las_axes(xyz)
     if len(pts) == 0 or not np.isfinite(pts).all():
         raise ValueError("LAS export needs at least one point and finite coordinates.")
     lo, hi = pts.min(axis=0), pts.max(axis=0)
@@ -83,7 +87,7 @@ def write_las(
         b"\0" * 16,  # project GUID: none
         1,
         2,
-        SYSTEM_ID.ljust(32, b"\0"),
+        system_id[:32].ljust(32, b"\0"),
         SOFTWARE.ljust(32, b"\0"),
         when.timetuple().tm_yday,
         when.year,

@@ -33,6 +33,7 @@ from nazar_contracts import (
     ArtifactCreate,
     ArtifactCreated,
     ArtifactKind,
+    AssetStatus,
     EventType,
     JobStatus,
     PipelineMode,
@@ -112,6 +113,7 @@ def lease(
         video_asset_id=video.id,
         keyframe_count=count,
         video_sha256=video.sha256,
+        telemetry_asset_id=job.telemetry_asset_id,
     )
 
 
@@ -180,6 +182,16 @@ def input_keyframe(number: int, job: LeasedJob, db: DbDep, settings: SettingsDep
     if not 1 <= number <= 9999 or not path.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Keyframe not found.")
     return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get("/jobs/{job_id}/inputs/telemetry")
+def input_telemetry(job: LeasedJob, db: DbDep, settings: SettingsDep) -> FileResponse:
+    """The normalised track (nazar.telemetry-track/1) validated at upload."""
+    row = db.get(AssetRecord, job.telemetry_asset_id) if job.telemetry_asset_id else None
+    path = asset_dir(settings, row.mission_id, row.id) / "track.json" if row else None
+    if row is None or row.status != AssetStatus.READY or path is None or not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This job's telemetry was removed.")
+    return FileResponse(path, media_type="application/json")
 
 
 @router.get("/jobs/{job_id}/inputs/video")

@@ -32,6 +32,7 @@ from nazar_contracts import (
     PreflightReport,
     ReadinessResponse,
     StageName,
+    TelemetrySummary,
     WorkerEventAck,
     WorkerEventBatch,
     WorkerHeartbeat,
@@ -60,6 +61,7 @@ class NazarContracts(BaseModel):
     asset: Asset
     asset_create: AssetCreate
     preflight_report: PreflightReport
+    telemetry_summary: TelemetrySummary
     job: Job
     artifact_create: ArtifactCreate
     artifact_created: ArtifactCreated

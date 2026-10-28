@@ -71,12 +71,14 @@ from nazar_contracts.missions import (
     ProcessingProgress,
     UserPublic,
 )
+from nazar_contracts.telemetry import AltitudeKind, TelemetrySummary, TimeGap
 
 __all__ = [
     "EVENT_SCHEMA_VERSION",
     "PIPELINE_STAGES",
     "PREFLIGHT_SCHEMA_VERSION",
     "TERMINAL_STATUSES",
+    "AltitudeKind",
     "AnalysisInfo",
     "ArtifactCreate",
     "ArtifactCreated",
@@ -119,6 +121,8 @@ __all__ = [
     "StageProgressData",
     "StageRunState",
     "StageState",
+    "TelemetrySummary",
+    "TimeGap",
     "UserPublic",
     "VideoProbe",
     "WarningData",

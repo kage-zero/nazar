@@ -4,6 +4,7 @@ import type {
   Credentials,
   Mission,
   PreflightReport,
+  TelemetrySummary,
   UserPublic,
 } from '@nazar/contracts';
 import { API_BASE, request } from './client';
@@ -23,9 +24,13 @@ export const missions = {
 };
 
 export const assets = {
-  register: (missionId: string, file: { name: string; size: number }) =>
+  register: (
+    missionId: string,
+    file: { name: string; size: number },
+    kind: 'video' | 'telemetry' = 'video',
+  ) =>
     request<Asset>('POST', `/api/missions/${missionId}/assets`, {
-      kind: 'video',
+      kind,
       filename: file.name,
       byte_size: file.size,
     }),
@@ -35,6 +40,8 @@ export const assets = {
   retry: (id: string) => request<Asset>('POST', `/api/assets/${id}/retry`),
   preflight: (id: string, signal?: AbortSignal) =>
     request<PreflightReport>('GET', `/api/assets/${id}/preflight`, undefined, signal),
+  telemetry: (id: string, signal?: AbortSignal) =>
+    request<TelemetrySummary>('GET', `/api/assets/${id}/telemetry`, undefined, signal),
   imageUrl: (id: string, kind: 'thumbs' | 'keyframes', image: number) =>
     `${API_BASE}/api/assets/${id}/${kind}/${image}.jpg`,
 };
