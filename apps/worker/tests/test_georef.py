@@ -8,6 +8,7 @@ import numpy as np
 from nazar_contracts import AltitudeKind
 from nazar_media.telemetry import Track, track_enu
 from nazar_worker.georef import align, umeyama
+from nazar_worker.utm import to_utm, utm_zone
 
 LAT0, LON0 = 41.8902, 12.4922
 M_PER_DEG_LAT = 111_070.0
@@ -116,3 +117,21 @@ def test_no_altitude_and_no_overlap_are_rejected() -> None:
     assert "no altitude" in align(centres, t[::5], flat).reasons[0]
     late = track_from_enu(t + 100, truth, AltitudeKind.RELATIVE)
     assert "Fewer than 5" in align(centres, t[::5], late).reasons[0]
+
+
+def test_georeferenced_points_land_on_the_gnss_track_in_utm() -> None:
+    t = np.arange(0, 30, 0.1)
+    truth = orbit_enu(len(t), radius=60, climb=3)
+    track = track_from_enu(t, truth, AltitudeKind.RELATIVE)
+    kf = np.arange(0, 300, 12)
+    centres = local_from_enu(truth[kf], scale=6.0)
+    got = align(centres, t[kf], track)
+    assert got.orientation_accepted
+    utm, code = got.to_utm(centres)
+    zone, north = utm_zone(LAT0, LON0)
+    assert code == 32633 and (zone, north) == (33, True)
+    e, n = to_utm(track.lat[kf], track.lon[kf], zone, north)
+    # track_from_enu uses a flat-earth metres-per-degree, so the synthetic track is ~0.1 %
+    # anisotropically distorted; a similarity cannot absorb that (~0.15 m over this orbit).
+    assert np.abs(utm[:, 0] - e).max() < 0.25 and np.abs(utm[:, 1] - n).max() < 0.25
+    assert np.abs(utm[:, 2] - track.alt[kf]).max() < 0.25  # heights stay above take-off

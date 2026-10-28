@@ -21,6 +21,7 @@ import numpy.typing as npt
 
 from nazar_contracts import AltitudeKind
 from nazar_media.telemetry import Track, sample_at
+from nazar_worker.utm import enu_to_utm
 
 MIN_MATCHED = 5
 MIN_COVERAGE = 0.5
@@ -32,6 +33,7 @@ MIN_PLANARITY = 0.15
 """Second / first singular value of the matched ENU path; below this it is close to a line."""
 OFFSET_SEARCH_S = 2.0
 OFFSET_STEP_S = 0.1
+OFFSET_MIN_GAIN_M = 0.05
 
 
 @dataclass
@@ -52,9 +54,17 @@ class Alignment:
     planarity: float | None = None
     scale_uncertainty_rel: float | None = None
 
+    origin: tuple[float, float, float] | None = None
+    """ENU origin: latitude, longitude (deg) and height (m, the track's altitude kind)."""
+
     def to_enu(self, xyz: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         assert self.metres_per_unit and self.rotation is not None and self.translation is not None
         return np.asarray(self.metres_per_unit * xyz @ self.rotation.T + self.translation)
+
+    def to_utm(self, xyz: npt.NDArray[np.float64]) -> tuple[npt.NDArray[np.float64], int]:
+        """Local points -> UTM easting, northing, height (zone of the ENU origin) + EPSG."""
+        assert self.orientation_accepted and self.origin is not None
+        return enu_to_utm(self.to_enu(xyz), *self.origin)
 
     def report(self) -> dict[str, Any]:
         def r(v: float | None, n: int = 3) -> float | None:
@@ -131,8 +141,10 @@ def align(
         s, rot, t, inl = _fit(centres[ok], enu[ok])
         res = enu[ok][inl] - (s * centres[ok][inl] @ rot.T + t)
         rms = float(np.sqrt((res**2).sum(axis=1).mean()))
-        # Prefer zero offset unless another is clearly better (it is a nuisance parameter).
-        score = rms * (1.0 if abs(offset) < 1e-9 else 1.05)
+        # Prefer zero offset unless another is clearly better (5 % and 5 cm): on a
+        # constant-speed orbit a time shift equals a rotation, so offsets fit equally well and
+        # picking one by float noise would rotate the whole georeference.
+        score = rms if abs(offset) < 1e-9 else rms * 1.05 + OFFSET_MIN_GAIN_M
         if best is None or score < best[0]:
             best = (score, float(offset))
     if best is None:
@@ -187,4 +199,5 @@ def align(
         return out
     out.orientation_accepted = True
     out.rotation, out.translation = rot, t
+    out.origin = (float(track.lat[0]), float(track.lon[0]), float(track.alt[0]))
     return out

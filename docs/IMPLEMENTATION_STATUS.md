@@ -62,7 +62,8 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
     - **Orientation** (an ENU georeference) additionally needs altitude, and a path that is not close to a straight line (planarity ≥ 0.15). Otherwise rotation about the line is undetermined.
   - Results:
     - Scale accepted: final artifacts keep their local coordinates, and their frame says `scale_status: metric_sensor` with `metres_per_unit`.
-    - The LAS export is written in metres. It uses ENU axes from the first fix when orientation was also accepted, and local axes otherwise. The system id says which.
+    - The LAS export is written in metres. When orientation was also accepted it is in **UTM** (WGS 84, zone of the first fix, EPSG 326xx/327xx), declared in a GeoKeyDirectory VLR; otherwise local axes. The system id says which.
+    - UTM is computed in-house (`apps/worker/src/nazar_worker/utm.py`, Krüger series to n⁴) so the worker needs no PROJ install. Heights keep the telemetry's altitude kind; no vertical datum is claimed.
     - The report gains a `sensor_alignment` section: every number, the thresholds, the ENU origin, and the reasons any claim was rejected.
     - Rejected: the frame stays `unknown`, and the `scale_unknown` warning says the telemetry was supplied but not applied, and why.
   - GTSAM pose-graph fusion is **not** used. One similarity transform is the honest model for one video with consumer GNSS. The stage label now says "Sim(3) GNSS alignment".
@@ -103,7 +104,7 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 ### Known limitations
 
 - **Scale quality** is bounded by consumer GNSS (a few metres) and by how far the drone flew. The reported `scale_uncertainty_rel_approx` counts fit noise only, not GNSS bias or the time-sync error that remains after the offset search.
-- **The cloud stays in its local frame,** with metres-per-unit metadata. Only the LAS export is converted to metres or ENU. No CRS or GeoKey VLR is written yet, so GIS tools see local ENU metres, not a projected CRS.
+- **The cloud stays in its local frame,** with metres-per-unit metadata. Only the LAS export is converted (metres, or UTM when georeferenced). Placement inherits consumer-GNSS error (metres); heights are relative to take-off, not to a vertical datum. Norway/Svalbard UTM zone exceptions are not applied.
 - **No altitude** (lat/lon only): no alignment is attempted. A horizontal-only fit would need a known up axis.
 - **Formats:** only the SRT layouts and CSV columns above. Other drone logs (e.g. `.DAT`, `.txt` flight records, GPX) are not read.
 - **Before validation:** a telemetry file attached before its video is validated shows "coverage known once the video is validated" until then.
@@ -126,7 +127,7 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 
 ### Next step
 
-Run B11 with a real DJI clip and its SRT. Then add a projected CRS (UTM through PyProj, once vetted) to the LAS export when orientation is accepted.
+Run B11 with a real DJI clip and its SRT. Then open the georeferenced LAS in a GIS (B13) to confirm it lands on the map.
 
 ## Milestone 3 report — Fast3R GPU geometry (2026-10-27, Windows 11 laptop, RTX 4050 Laptop 6 GB)
 
@@ -278,6 +279,32 @@ There is no ground truth for the sample, so absolute accuracy is **not measured*
 2. Write a Fast3R adapter for the `geometry` stage behind the same contract. The CPU baseline stays as the fallback.
 3. Meanwhile, on CPU: telemetry import, measurement tools and confidence colouring in the viewer.
 
+## Georeferenced LAS in UTM (2026-10-28)
+
+### Implemented
+- `utm.py`: ENU → geodetic (iterative, WGS84) → UTM (Krüger series to n⁴), plus zone and EPSG selection.
+- `las.py`: optional GeoKeyDirectory VLR (`LASF_Projection`, record 34735) declaring ProjectedCSTypeGeoKey, metre units; `read_las` reports the EPSG code back.
+- `Alignment.origin` and `Alignment.to_utm`; the georeferenced LAS branch now writes UTM with the VLR, and the report records `crs`.
+- Clock-offset search now needs a 5 cm absolute gain (as well as 5 %) before it prefers a non-zero offset. On a constant-speed orbit a time shift is the same as a rotation, so float noise could otherwise pick an offset and rotate the whole georeference.
+
+### Verified
+- UTM matches PROJ (pyproj 3.7.1, run once in a throwaway environment; not a project dependency) to within 1 mm at six points: Rome, Sydney (south), Reykjavik, the central meridian, the equator and a zone edge.
+- ENU → geodetic → ENU round trip under 1 µm.
+- GeoKey VLR round-trips through `write_las` / `read_las`, and the point offset accounts for it.
+- On a SYNTHETIC orbit, georeferenced keyframes land on the track's own UTM coordinates within 0.25 m. The residual comes from the test helper's flat-earth lat/lon, not the code.
+- `pnpm check`: 15 of 15 tasks (worker 41 passed).
+
+### Performance-accuracy evidence
+- Projection error versus PROJ: < 1 mm. The real accuracy limit is the GNSS track (metres) and the alignment RMS shown in the report.
+
+### Known limitations
+- No vertical datum: heights are the telemetry's (usually above take-off).
+- Norway/Svalbard zone exceptions not applied (the standard zone is still valid).
+- Not yet opened in a real GIS (B13).
+
+### Next step
+B11 (real DJI SRT) then B13 (open the LAS in QGIS/CloudCompare).
+
 ## Milestone 4 report (2026-10-27, Windows 11 laptop, CPU only)
 
 ### Implemented
@@ -374,7 +401,7 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 0. **Your checks:** [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
 2. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
-3. **Telemetry with real data** (B11), then a projected CRS for georeferenced LAS.
+3. **Telemetry with real data** (B11) and the georeferenced LAS in a GIS (B13).
 
 ## Resume instructions
 

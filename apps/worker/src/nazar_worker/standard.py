@@ -689,13 +689,17 @@ class Exporting(_Stage):
         pts, cols, labels = run.final
         al = run.alignment
         if al is not None and al.orientation_accepted:
+            utm, code = al.to_utm(pts)
             las = write_las(
-                al.to_enu(pts), cols, labels, enu=True, system_id=b"NAZAR local ENU m, no CRS"
+                utm, cols, labels, enu=True, epsg=code, system_id=b"NAZAR UTM from GNSS alignment"
             )
+            assert run.telemetry is not None
+            run.telemetry["crs"] = f"EPSG:{code}"
             las_note = (
-                "LAS 1.2, point format 2 (RGB). East-north-up metres from the ENU origin in "
-                "sensor_alignment (WGS84 tangent plane); no CRS VLR. Height datum: "
-                f"{run.telemetry and run.telemetry['altitude_kind']}."
+                f"LAS 1.2, point format 2 (RGB). Horizontal: EPSG:{code} (WGS 84 / UTM zone "
+                f"{code % 100}{'N' if code < 32700 else 'S'}), declared in a GeoKey VLR. "
+                f"Heights in metres, {run.telemetry['altitude_kind']}; no vertical datum is "
+                "claimed. Placement inherits consumer-GNSS error (metres)."
             )
         elif al is not None and al.scale_accepted:
             assert al.metres_per_unit is not None

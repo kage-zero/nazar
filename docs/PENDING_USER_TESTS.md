@@ -78,6 +78,9 @@ Run `pnpm dev`, and in a second terminal `pnpm worker`, then open http://127.0.0
   - Expected: the coloured cloud plus a thin line for the camera path, upright (+Y up).
   - Without telemetry the coordinates are unitless, so the viewer's "metres" are not real metres.
   - _Why it needs you:_ the file passed three.js's own glTF loader and our spec checks, but no desktop viewer was opened.
+- [ ] **B13. Georeferenced LAS in a GIS.** Needs B11 first (a real clip whose report says orientation was accepted). Download the LAS and open it in QGIS (drag in; it reads LAS as a point cloud) or CloudCompare.
+  - Expected: QGIS reports the layer CRS as EPSG:326xx (WGS 84 / UTM), and the points sit on the flight location over an OpenStreetMap basemap, within a few metres.
+  - _Why it needs you:_ the UTM maths matches PROJ to under 1 mm and the GeoKey record round-trips in our own reader, but no GIS has opened one of these files.
 - [ ] **B6. Readability.** Is the copy clear? Is anything confusing, cramped, or unclear about being a synthetic test scene?
 
 ## C. Decisions only you can make

@@ -55,3 +55,17 @@ def test_rejects_empty_or_non_finite_clouds() -> None:
         write_las(np.zeros((0, 3)), rgb[:0])
     with pytest.raises(ValueError):
         write_las(np.array([[np.nan, 0.0, 0.0]]), rgb)
+
+
+def test_geokeys_vlr_declares_the_projected_crs() -> None:
+    xyz = np.array([[291945.99, 4640626.6, 30.0], [292000.0, 4640700.0, 45.5]])
+    rgb = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.uint8)
+    data = write_las(xyz, rgb, enu=True, epsg=32633)
+    las = read_las(data)
+    assert las.epsg == 32633
+    assert np.abs(las.xyz - xyz).max() < 1e-3
+    # Header: one VLR, points start after it (54-byte VLR header + 4 + 5 keys x 4 shorts).
+    offset_to_points, n_vlr = struct.unpack_from("<IH", data, 96)
+    assert n_vlr == 1 and offset_to_points == 227 + 54 + 2 * (4 + 20)
+    assert data[229:244] == b"LASF_Projection"
+    assert read_las(write_las(xyz, rgb, enu=True)).epsg is None
