@@ -1,90 +1,82 @@
 # College GPU day — checklist (Milestone 1)
 
-_Written 2026-10-28 for the session at college. Claude: read this first when the user says
-they are at college, then work through it step by step with them._
+_Revised 2026-10-29 at college. Claude: when the user says they are at college, follow this
+step by step with them._
+
+**How access works** (from the user's GPU-access email + `docs/SyncAI-VDI User Guide.pdf`)
+- The SyncHPC portal is at `https://172.32.0.8/Login`, a **private campus address**: reachable only
+  from the college network. The laptop must be on college Wi-Fi/LAN.
+- A VDI session is opened with the **TurboVNC viewer** (v3.2, link in the email) on the laptop.
+- The whole project stays on the laptop. The VDI only runs the GPU worker.
 
 **Ground rules**
-- You log in to SyncVDI yourself. Never paste the college username, password, OTP or any token
-  into the chat or into a file. Claude will not ask for them or automate the login.
-- Nothing heavy runs on the college GPU until steps 1–4 below pass. No speculative jobs.
-- Paste command *output* only. `nazar-worker doctor` prints no secrets; still check before
-  pasting.
-- Results go into `docs/PENDING_USER_TESTS.md` (section A) and, at the end,
-  `docs/IMPLEMENTATION_STATUS.md` + ADR-0003.
+- You log in yourself. The portal username/password are in a private email/PDF: never paste
+  them into the chat, a file, or the repo. Claude never asks for them or automates the login.
+- Paste command *output* only. Never paste `NAZAR_WORKER_TOKEN`; type it in the VDI yourself.
+- Nothing heavy runs on the college GPU until steps 1–5 pass. No speculative jobs.
+- Exposing the laptop's API on the campus network (step 6) needs your explicit OK first, and
+  only for the duration of the test.
 
-**Before leaving home**
-- [ ] Laptop charged; repo up to date (`git log --oneline -1` should show the bundle-mode commit or newer).
-- [ ] Decide how code gets into the VDI: `git clone` (needs network, step 3) or a zip of the
-      repo on a USB drive / SyncHPC storage. Make the zip without `var/`, `.env`,
-      `node_modules`, `.venv`: `git archive -o nazar.zip HEAD`.
-- [ ] Optional: copy `var/gpu/weights/Fast3R_ViT_Large_512/` (≈ 2.5 GB) to the same drive, in
-      case the VDI cannot download it (step 6).
+## 1. Laptop prerequisites
+- [ ] On the college network: open `https://172.32.0.8/Login` in the browser. A certificate
+      warning is expected for an internal IP; continue only if it is the SyncHPC login page.
+- [ ] Install TurboVNC viewer 3.2 (Windows installer from the link in the email).
+- [ ] Note the laptop's campus IP: `ipconfig` → the Wi-Fi adapter's IPv4 address.
 
-## 1. Session facts (A4, A5)
-- [ ] Start a **Linux** VDI session (GPU profile). Note:
-  - session length offered, and whether it survives a disconnect;
-  - home/persistent directory path and free space (`df -h ~`), and whether files survive a new
-    session.
+## 2. Start the GPU session (A4, A5)
+- [ ] Log in, request a **Linux** workstation **with a GPU**, wait for **Ready**, press
+      **Connect**, open the downloaded `.vnc` file with TurboVNC.
+- [ ] Note: duration offered, whether it survives Disconnect, home path + free space (`df -h ~`).
 
-## 2. Toolchain (A1)
+## 3. Tools and GPU (A1) — in a VDI terminal
 ```bash
-python3 --version; which uv conda git nvidia-smi
-nvidia-smi
+python3 --version; which uv conda git curl; nvidia-smi
 ```
-- [ ] If `uv` is missing and the network allows it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-      (installs into `~/.local/bin`, no root). Otherwise report and we pick conda/pip.
 
-## 3. Network (A3) — decides ADR-0003 online vs bundle mode
+## 4. Network from the VDI (A3) — decides how code, weights and jobs move
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/simple/
 curl -sS -o /dev/null -w "%{http_code}\n" https://huggingface.co
 curl -sS -o /dev/null -w "%{http_code}\n" https://github.com
+ping -c 2 <laptop IP>          # can the VDI see the laptop at all?
 ```
-- [ ] Paste the three codes (200 / 30x = reachable; an error = blocked).
 
-## 4. Install + doctor (A1, A2)
+## 5. Code into the VDI + doctor (A1, A2)
+- The repo has no Git remote. On the laptop: `git archive -o nazar.zip HEAD` (no `.env`,
+  `var/`, weights). Move it with the portal's **Storage** module (upload from the laptop
+  browser, download inside the VDI), then `unzip nazar.zip -d ~/nazar`.
+- [ ] If `uv` is missing and PyPI is reachable: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 ```bash
-cd ~/nazar            # wherever the repo went
-uv sync --package nazar-worker
-uv run nazar-worker doctor --workdir ~/nazar-work
-uv run nazar-worker stages
+cd ~/nazar && uv sync --package nazar-worker
+uv run nazar-worker doctor --workdir ~/nazar-work   # paste this JSON
 ```
-- [ ] Paste the doctor JSON (GPU model, VRAM, driver/CUDA, disk, CPU).
 
-## 5. Can the VDI reach our API? (C2 — hosting)
-- [ ] Only if step 3 showed outbound HTTPS works. Options to decide with Claude: laptop via a
-      tunnel, a small cloud VM, or the college network. **No tunnel is opened without your
-      explicit OK.**
-- If outbound is blocked: **bundle mode** (built 2026-10-28, ADR-0003). Prepare at home: start
-  the API, create a mission with sample1, press Reconstruct, stop any online worker, then
-  `uv run nazar-worker bundle export --out mission.zip` (needs `NAZAR_WORKER_TOKEN` in `.env`).
-  Put `mission.zip` on the USB drive with the repo zip. At college:
-  ```bash
-  uv run nazar-worker bundle run mission.zip --out result.zip   # no network, no token
-  ```
-  Bring `result.zip` home; then `uv run nazar-worker bundle import result.zip` with the API
-  running. The job page fills in with the college run's stages and timings.
+## 6. Can the VDI reach the laptop's API? (C2 — decides online vs bundle mode)
+Only with your OK (it opens the API to the campus network while it runs):
+- Laptop: start the API on all interfaces: `NAZAR_API_HOST=0.0.0.0` in `.env`, `pnpm dev`.
+  Windows Firewall will ask: allow **Private** only if possible; remove the rule afterwards.
+- VDI: `curl -sS http://<laptop IP>:8000/api/health`
+  - JSON back → **online mode** (live preview in the laptop browser).
+  - Timeout → **bundle mode**: export on the laptop, move `mission.zip` / `result.zip` through
+    portal Storage instead of a USB drive (commands in ADR-0003).
+- Afterwards: set `NAZAR_API_HOST` back to `127.0.0.1`.
 
-## 6. Fast3R on the college GPU (only if 1–4 passed)
+## 7. Fast3R on the college GPU
 ```bash
-uv run python scripts/setup_fast3r.py          # creates var/gpu/fast3r-env, pinned versions
+uv run python scripts/setup_fast3r.py          # needs PyPI + Hugging Face from the VDI
 uv run python scripts/setup_fast3r.py --check  # must end with "Fast3R runtime OK"
 ```
-- The script was developed on Windows; the Linux path (`bin/python`) exists but is untested.
-  Paste any error rather than working around it.
-- If downloads are blocked, copy the weights folder from the USB drive into
-  `var/gpu/weights/Fast3R_ViT_Large_512/`, then `--check --hash`.
-- [ ] One measured run on the sample video (no other jobs):
-  - online mode: run `uv run nazar-worker run --api <API URL>` with `NAZAR_WORKER_TOKEN` set in
-    the shell (type it yourself; never paste it in chat), then press Reconstruct on the laptop;
-  - bundle mode: `bundle run` as in step 5 (the result's `geometry` field says fast3r or
-    cpu-baseline; stage durations are in the report after import);
-  - record: geometry stage time, first preview time, passes, peak VRAM — compare with the laptop
-    table in `docs/research/model-selection.md` (sample1: 13.8 s, 4 passes, 3,149 MiB;
-    sample2: 50.5 s, 15 passes).
+- Linux path of the script is untested: paste errors, don't work around them.
+- If Hugging Face is blocked: upload `var/gpu/weights/Fast3R_ViT_Large_512/` (≈ 2.5 GB) via
+  portal Storage, then `--check --hash`.
+- [ ] One measured run of sample1:
+  - online: `NAZAR_WORKER_TOKEN=<type it> uv run nazar-worker run --api http://<laptop IP>:8000 --modes standard`, then Reconstruct in the laptop browser;
+  - bundle: `uv run nazar-worker bundle run mission.zip --out result.zip`, then import on the laptop;
+  - record geometry time, passes, peak VRAM (`nvidia-smi`) vs laptop: sample1 13.8 s,
+    4 passes, 3,149 MiB.
 
-## 7. Wrap-up
-- [ ] Note anything that differed from this list.
-- [ ] Claude updates: PENDING_USER_TESTS (A1–A5 ticked with results), IMPLEMENTATION_STATUS
-      (Milestone 1 report), ADR-0003 (online or bundle mode), model-selection (college numbers).
-- [ ] Log out of the VDI session yourself.
+## 8. Wrap-up
+- [ ] Copy results off the VDI (the only copy must never stay in VDI temp storage).
+- [ ] Revert `NAZAR_API_HOST`, remove the firewall rule, log out of the VDI yourself.
+- [ ] Claude updates PENDING_USER_TESTS (A1–A5), IMPLEMENTATION_STATUS (Milestone 1),
+      ADR-0003 (online or bundle), model-selection (college numbers).
