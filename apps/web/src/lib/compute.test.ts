@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { presenceText } from './compute';
+import { computeFromSearch, presenceText } from './compute';
 
 describe('compute presence text', () => {
   it('says how to bring an offline worker online', () => {
@@ -26,5 +26,14 @@ describe('compute presence text', () => {
         geometry: 'cpu-baseline',
       }),
     ).toContain('CPU baseline');
+  });
+});
+
+describe('compute from the page URL', () => {
+  it('accepts only known targets', () => {
+    expect(computeFromSearch('?compute=college')).toBe('college');
+    expect(computeFromSearch('?x=1&compute=local')).toBe('local');
+    expect(computeFromSearch('?compute=moon')).toBeNull();
+    expect(computeFromSearch('')).toBeNull();
   });
 });

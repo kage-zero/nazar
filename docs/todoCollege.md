@@ -62,6 +62,9 @@ Only with your OK (it opens the API to the campus network while it runs):
 - Afterwards: set `NAZAR_API_HOST` back to `127.0.0.1`.
 
 ## 7. Fast3R on the college GPU
+Shortcut on the laptop: `run-college.bat` (asks Online or Bundle, preselects College GPU).
+In the VDI for online mode: `bash scripts/run-college-worker.sh <laptop IP>` (asks for the
+token with input hidden).
 ```bash
 uv run python scripts/setup_fast3r.py          # needs PyPI + Hugging Face from the VDI
 uv run python scripts/setup_fast3r.py --check  # must end with "Fast3R runtime OK"

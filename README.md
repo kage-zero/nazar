@@ -27,6 +27,15 @@ pnpm worker                 # second terminal: worker for the CPU baseline (Reco
                             # first visit: create the operator account in the web app
 ```
 
+On Windows, after the setup lines, double-click instead of `pnpm dev` + `pnpm worker`:
+
+- `run-local.bat`: API, web and a worker on this laptop's GPU (Fast3R from `var/gpu` when set
+  up); opens the browser with **Run on → Local GPU**.
+- `run-college.bat`: API and web only, with **Run on → College GPU**. It asks for _Online_ or
+  _Bundle_. Online opens the API to the campus network after a confirmation; in the VDI run
+  `bash scripts/run-college-worker.sh <laptop IP>`. Bundle keeps the API private and walks
+  through export, portal Storage and import. See `docs/todoCollege.md`.
+
 ## Checks
 
 ```bash

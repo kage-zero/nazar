@@ -4,3 +4,5 @@
 *.png binary
 *.ply binary
 *.glb binary
+*.bat text eol=crlf
+*.cmd text eol=crlf

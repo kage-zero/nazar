@@ -9,8 +9,19 @@ export const COMPUTE_LABEL: Record<ComputeTarget, string> = {
   college: 'College GPU',
 };
 
+/** `?compute=college` in the page URL (used by run-college.bat / run-local.bat). */
+export function computeFromSearch(search: string): ComputeTarget | null {
+  const value = new URLSearchParams(search).get('compute');
+  return value === 'local' || value === 'college' ? value : null;
+}
+
 export function loadCompute(): ComputeTarget {
   try {
+    const fromUrl = computeFromSearch(window.location.search);
+    if (fromUrl) {
+      saveCompute(fromUrl);
+      return fromUrl;
+    }
     return window.localStorage.getItem(KEY) === 'college' ? 'college' : 'local';
   } catch {
     return 'local';
