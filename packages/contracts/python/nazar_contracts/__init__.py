@@ -22,7 +22,13 @@ from nazar_contracts.events import (
     StageProgressData,
     WarningData,
 )
-from nazar_contracts.health import CheckStatus, HealthResponse, ReadinessCheck, ReadinessResponse
+from nazar_contracts.health import (
+    CheckStatus,
+    HealthResponse,
+    ReadinessCheck,
+    ReadinessResponse,
+    WorkerPresence,
+)
 from nazar_contracts.job_api import (
     ArtifactCreate,
     ArtifactCreated,
@@ -42,6 +48,7 @@ from nazar_contracts.job_api import (
 from nazar_contracts.jobs import (
     PIPELINE_STAGES,
     TERMINAL_STATUSES,
+    ComputeTarget,
     JobStatus,
     StageName,
     can_transition,
@@ -103,6 +110,7 @@ __all__ = [
     "Job",
     "JobCreate",
     "JobEvent",
+    "ComputeTarget",
     "JobStatus",
     "Keyframe",
     "KeyframeReason",
@@ -116,6 +124,7 @@ __all__ = [
     "Provenance",
     "ReadinessCheck",
     "ReadinessResponse",
+    "WorkerPresence",
     "ScaleStatus",
     "StageName",
     "StageProgressData",

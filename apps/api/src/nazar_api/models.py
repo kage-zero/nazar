@@ -92,6 +92,7 @@ class JobRecord(Base):
     # the worker is told it is gone and records that.
     telemetry_asset_id: Mapped[str | None] = mapped_column(String(32), default=None)
     pipeline: Mapped[str] = mapped_column(String(16))
+    compute: Mapped[str] = mapped_column(String(16), default="local", server_default="local")
     status: Mapped[str] = mapped_column(String(24), index=True)
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     last_seq: Mapped[int] = mapped_column(Integer, default=0)

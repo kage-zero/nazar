@@ -1,4 +1,4 @@
-import type { Job, PipelineMode } from '@nazar/contracts';
+import type { ComputeTarget, Job, PipelineMode } from '@nazar/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { applyEvent, isTerminal } from '../lib/jobState';
 import { browserSocket, JobStream, streamUrl, type StreamState } from '../lib/jobStream';
@@ -96,8 +96,8 @@ export function useJob(missionId: string | null) {
     loaded: missionId !== null && loadedFor === missionId,
     stream: active ? stream : 'closed',
     error,
-    start: (pipeline: PipelineMode) =>
-      missionId ? run(() => api.create(missionId, pipeline)) : Promise.resolve(),
+    start: (pipeline: PipelineMode, compute: ComputeTarget = 'local') =>
+      missionId ? run(() => api.create(missionId, pipeline, compute)) : Promise.resolve(),
     cancel: () => (jobId ? run(() => api.cancel(jobId)) : Promise.resolve()),
     retry: () => (jobId ? run(() => api.retry(jobId)) : Promise.resolve()),
   };

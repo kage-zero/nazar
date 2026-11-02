@@ -23,11 +23,12 @@ export function Tag({
   tone = 'mint',
   children,
   className,
+  ...rest
 }: {
   tone?: 'mint' | 'mist' | 'carbon';
   children: ReactNode;
   className?: string;
-}) {
+} & Omit<HTMLAttributes<HTMLSpanElement>, 'children' | 'className'>) {
   const tones = {
     mint: 'bg-mint text-carbon',
     mist: 'bg-mist text-slate',
@@ -35,6 +36,7 @@ export function Tag({
   };
   return (
     <span
+      {...rest}
       className={cx(
         'mono-label inline-flex items-center gap-2 rounded-tag px-3 py-1',
         tones[tone],

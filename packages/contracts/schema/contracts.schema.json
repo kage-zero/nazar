@@ -611,6 +611,15 @@
       "title": "CheckStatus",
       "type": "string"
     },
+    "ComputeTarget": {
+      "description": "Where a job's GPU work runs. Each worker declares its location and only leases jobs\naimed at it (the API never moves a job between locations on its own).",
+      "enum": [
+        "local",
+        "college"
+      ],
+      "title": "ComputeTarget",
+      "type": "string"
+    },
     "CoordinateFrame": {
       "additionalProperties": false,
       "properties": {
@@ -873,6 +882,11 @@
         "attempt": {
           "minimum": 1,
           "type": "integer"
+        },
+        "compute": {
+          "$ref": "#/$defs/ComputeTarget",
+          "default": "local",
+          "description": "Which worker location runs this job."
         },
         "created_at": {
           "format": "date-time",
@@ -1716,6 +1730,13 @@
         },
         "ready": {
           "type": "boolean"
+        },
+        "workers": {
+          "description": "One entry per compute location.",
+          "items": {
+            "$ref": "#/$defs/WorkerPresence"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -2601,6 +2622,11 @@
           "default": null,
           "description": "Lease only this queued job (offline bundle import); absent: oldest first."
         },
+        "location": {
+          "$ref": "#/$defs/ComputeTarget",
+          "default": "local",
+          "description": "Only jobs aimed at this location are leased."
+        },
         "modes": {
           "items": {
             "$ref": "#/$defs/PipelineMode"
@@ -2620,6 +2646,47 @@
         "modes"
       ],
       "title": "WorkerLeaseRequest",
+      "type": "object"
+    },
+    "WorkerPresence": {
+      "description": "Whether a worker at this location polled the API recently (presence, not a secret).",
+      "properties": {
+        "geometry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GeometryBackend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Geometry backend it reported for standard jobs (None: not reported)."
+        },
+        "last_seen_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Seconds since its last call; None: never."
+        },
+        "location": {
+          "$ref": "#/$defs/ComputeTarget"
+        },
+        "online": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "location",
+        "online",
+        "last_seen_s",
+        "geometry"
+      ],
+      "title": "WorkerPresence",
       "type": "object"
     }
   },

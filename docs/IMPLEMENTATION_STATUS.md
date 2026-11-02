@@ -279,6 +279,23 @@ There is no ground truth for the sample, so absolute accuracy is **not measured*
 2. Write a Fast3R adapter for the `geometry` stage behind the same contract. The CPU baseline stays as the fallback.
 3. Meanwhile, on CPU: telemetry import, measurement tools and confidence colouring in the viewer.
 
+## Local or college GPU per job (2026-11-02)
+
+### Implemented
+- **Run on: Local GPU / College GPU** switch above Reconstruct. It shows whether the chosen worker is online and which method it will use, and is remembered per browser. The job panel tags each job with its GPU; a queued college job says it is waiting for the college worker.
+- Contracts: `ComputeTarget`; `JobCreate.compute`, `Job.compute`, `WorkerLeaseRequest.location`, `ReadinessResponse.workers` (`WorkerPresence`). Migration `0004_job_compute` (existing jobs become `local`).
+- API: leases only match the worker's location; presence and geometry tracked per location from the `X-Nazar-Worker-Location` header (unknown values rejected with 400). The `worker` / `gpu` readiness checks summarise both.
+- Worker: `run --location local|college` (env `NAZAR_WORKER_LOCATION`); `bundle export --location` (default college); bundles carry the location to import.
+
+### Verified
+- `apps/api/tests/test_compute.py` (5): default local; a college job is ignored by the local worker and run by the college one; retry keeps the location; per-location readiness; bad header rejected; a college job through a bundle.
+- Web unit tests for the presence text; E2E: choose College GPU, start a job, the local worker leaves it queued and labelled, cancel, choice remembered (desktop + mobile).
+- `pnpm check`: 15 of 15 tasks (API 53 passed, 1 skipped; web 35).
+
+### Known limitations
+- No automatic fallback between GPUs, by design: a college job waits until a college worker connects (or is cancelled and restarted on the local GPU).
+- Not yet exercised with a real college worker (todoCollege.md step 7).
+
 ## Offline bundle mode (2026-10-28)
 
 ### Implemented

@@ -27,6 +27,14 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ComputeTarget(StrEnum):
+    """Where a job's GPU work runs. Each worker declares its location and only leases jobs
+    aimed at it (the API never moves a job between locations on its own)."""
+
+    LOCAL = "local"
+    COLLEGE = "college"
+
+
 class StageName(StrEnum):
     """Processing stages. Each value is also the job status while that stage runs."""
 

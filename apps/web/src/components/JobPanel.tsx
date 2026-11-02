@@ -1,4 +1,11 @@
-import type { ArtifactKind, ArtifactManifest, Job, PipelineMode } from '@nazar/contracts';
+import type {
+  ArtifactKind,
+  ArtifactManifest,
+  ComputeTarget,
+  Job,
+  PipelineMode,
+  WorkerPresence,
+} from '@nazar/contracts';
 import { useEffect, useRef, useState } from 'react';
 import { jobs } from '../api/jobs';
 import {
@@ -9,6 +16,7 @@ import {
   savePrefs,
   type CompletionFeedback,
 } from '../lib/completion';
+import { COMPUTE_LABEL, loadCompute, presenceText, saveCompute } from '../lib/compute';
 import { isTerminal } from '../lib/jobState';
 import { jobMethod, METHOD_TAG } from '../lib/provenance';
 import type { StreamState } from '../lib/jobStream';
@@ -40,7 +48,9 @@ function statusText(job: Job): string {
     case 'created':
     case 'validating':
     case 'queued':
-      return 'Queued. Waiting for a worker to pick it up.';
+      return job.compute === 'college'
+        ? 'Queued. Waiting for the college GPU worker to pick it up.'
+        : 'Queued. Waiting for a worker to pick it up.';
     case 'cancel_requested':
       return 'Cancelling. The worker stops at its next safe point.';
     case 'completed':
@@ -108,7 +118,9 @@ interface Props {
   canStart: boolean;
   stream: StreamState;
   error: string | null;
-  onStart: (pipeline: PipelineMode) => Promise<void>;
+  /** Presence of the local and college workers (from readiness). */
+  workers: WorkerPresence[];
+  onStart: (pipeline: PipelineMode, compute: ComputeTarget) => Promise<void>;
   onCancel: () => Promise<void>;
   onRetry: () => Promise<void>;
 }
@@ -120,11 +132,13 @@ export function JobPanel({
   canStart,
   stream,
   error,
+  workers,
   onStart,
   onCancel,
   onRetry,
 }: Props) {
   const [busy, setBusy] = useState(false);
+  const [compute, setCompute] = useState<ComputeTarget>(loadCompute);
   const [prefs, setPrefs] = useState(loadPrefs);
   const [feedback, setFeedback] = useState<CompletionFeedback | null>(null);
   const watched = useRef<string | null>(null);
@@ -172,6 +186,11 @@ export function JobPanel({
           {job?.pipeline === 'test' && <Tag tone="carbon">Test pipeline</Tag>}
           {job?.pipeline === 'standard' && method && method !== 'test' && (
             <Tag tone="mint">{METHOD_TAG[method]}</Tag>
+          )}
+          {job && (
+            <Tag tone="mist" data-testid="job-compute">
+              {COMPUTE_LABEL[job.compute ?? 'local']}
+            </Tag>
           )}
           {job && STREAM_TEXT[stream] && <Tag tone="mist">{STREAM_TEXT[stream]}</Tag>}
         </div>
@@ -228,13 +247,48 @@ export function JobPanel({
         </p>
       )}
 
+      {showStart && (
+        <fieldset className="mt-6" data-testid="compute-toggle">
+          <legend className="mono-label text-slate">Run on</legend>
+          <div className="mt-2 inline-flex rounded-button-sm border-[1.5px] border-slate p-0.5">
+            {(['local', 'college'] as const).map((target) => (
+              <label
+                key={target}
+                className={`cursor-pointer rounded-button-sm px-3 py-1.5 text-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 ${
+                  compute === target ? 'bg-carbon text-paper' : 'text-slate hover:bg-mist'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="compute"
+                  value={target}
+                  className="sr-only"
+                  checked={compute === target}
+                  onChange={() => {
+                    setCompute(target);
+                    saveCompute(target);
+                  }}
+                />
+                {COMPUTE_LABEL[target]}
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-sm text-slate" data-testid="compute-presence">
+            {presenceText(
+              compute,
+              workers.find((w) => w.location === compute),
+            )}
+          </p>
+        </fieldset>
+      )}
+
       <div className="mt-6 flex flex-wrap gap-3">
         {showStart && (
           <>
-            <Button disabled={busy} onClick={act(() => onStart('standard'))}>
+            <Button disabled={busy} onClick={act(() => onStart('standard', compute))}>
               Reconstruct
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={act(() => onStart('test'))}>
+            <Button variant="ghost" disabled={busy} onClick={act(() => onStart('test', compute))}>
               Run test pipeline
             </Button>
           </>

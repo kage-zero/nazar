@@ -115,8 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.processor = processor
     app.state.login_throttle = LoginThrottle()
-    app.state.worker_seen_at = None
-    app.state.worker_geometry = None
+    app.state.worker_seen_at = {}  # ComputeTarget -> last worker call
+    app.state.worker_geometry = {}  # ComputeTarget -> reported geometry backend
     app.dependency_overrides[get_settings] = lambda: settings
     app.add_middleware(RequireRequestHeader)
     app.add_middleware(

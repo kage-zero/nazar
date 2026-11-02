@@ -18,7 +18,7 @@ from nazar_api.jobs import expire_leases
 from nazar_api.main import create_app
 from nazar_api.models import AssetRecord, JobRecord, utcnow
 from nazar_api.storage import PREFLIGHT_DIR, asset_dir
-from nazar_contracts import GeometryBackend, PipelineMode, StageName, WorkerLease
+from nazar_contracts import ComputeTarget, GeometryBackend, PipelineMode, StageName, WorkerLease
 from nazar_worker.client import WorkerClient
 from nazar_worker.ply import read_ply
 from nazar_worker.runner import JobRun, geometry_backend, run_loop
@@ -73,7 +73,9 @@ def start_job(client: TestClient, mission_id: str, pipeline: str = "test") -> di
     return body
 
 
-def worker_client(client: TestClient) -> WorkerClient:
+def worker_client(
+    client: TestClient, location: ComputeTarget = ComputeTarget.LOCAL
+) -> WorkerClient:
     raw = TestClient(client.app)  # no session cookie; no lifespan re-entry
 
     def send(
@@ -84,7 +86,7 @@ def worker_client(client: TestClient) -> WorkerClient:
         )
         return response.status_code, response.content
 
-    return WorkerClient("http://testserver", TOKEN, attempts=1, transport=send)
+    return WorkerClient("http://testserver", TOKEN, attempts=1, transport=send, location=location)
 
 
 def events(client: TestClient, job_id: str, after: int = 0) -> list[dict[str, Any]]:

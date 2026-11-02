@@ -231,3 +231,27 @@ test('reconstruct builds real geometry from the sample video, progressively', as
   await page.screenshot({ path: testInfo.outputPath('reconstruct-complete.png'), fullPage: true });
   expect(errors).toEqual([]);
 });
+
+test('a job started for the college GPU waits for the college worker', async ({ page }) => {
+  test.setTimeout(180_000);
+  await createMission(page, 'College');
+  await uploadSample(page);
+  const panel = page.getByTestId('job-panel');
+  const toggle = panel.getByTestId('compute-toggle');
+  // Only local workers run in this E2E profile, so the college GPU reads as offline.
+  await toggle.getByText('College GPU').click();
+  await expect(panel.getByTestId('compute-presence')).toContainText('College GPU worker: offline');
+
+  await panel.getByRole('button', { name: 'Run test pipeline' }).click();
+  const status = page.getByTestId('job-status');
+  await expect(status).toContainText('Waiting for the college GPU worker');
+  await expect(panel.getByTestId('job-compute')).toHaveText('College GPU');
+  // The local worker polls every 0.5 s; it must leave this job alone.
+  await page.waitForTimeout(3_000);
+  await expect(status).toHaveAttribute('data-status', 'queued');
+
+  await panel.getByRole('button', { name: 'Cancel job' }).click();
+  await expect(status).toHaveAttribute('data-status', 'cancelled', { timeout: 30_000 });
+  // The choice is remembered for the next job.
+  await expect(toggle.getByRole('radio', { name: 'College GPU' })).toBeChecked();
+});

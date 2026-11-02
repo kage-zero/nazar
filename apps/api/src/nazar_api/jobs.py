@@ -20,6 +20,7 @@ from nazar_contracts import (
     PIPELINE_STAGES,
     TERMINAL_STATUSES,
     ArtifactManifest,
+    ComputeTarget,
     EventType,
     Job,
     JobEvent,
@@ -246,6 +247,7 @@ def snapshot(db: Session, job: JobRecord) -> Job:
         mission_id=job.mission_id,
         status=JobStatus(job.status),
         pipeline=PipelineMode(job.pipeline),
+        compute=ComputeTarget(job.compute),
         attempt=job.attempt,
         last_seq=job.last_seq,
         stages=list(stages.values()),
@@ -310,11 +312,14 @@ def lease_next(
     modes: list[PipelineMode],
     seconds: int,
     job_id: str | None = None,
+    location: ComputeTarget = ComputeTarget.LOCAL,
 ) -> Lease | None:
-    """Lease the oldest matching queued job, or only `job_id` when given (bundle import)."""
+    """Lease the oldest matching queued job aimed at `location`, or only `job_id` when given
+    (bundle import)."""
     expire_leases(db)
     query = select(JobRecord).where(
         JobRecord.status == JobStatus.QUEUED,
+        JobRecord.compute == location.value,
         JobRecord.lease_id.is_(None),
         JobRecord.cancel_requested.is_(False),
         JobRecord.pipeline.in_([m.value for m in modes]),

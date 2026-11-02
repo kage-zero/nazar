@@ -25,6 +25,7 @@ from typing import Any
 from nazar_contracts import (
     ArtifactCreate,
     ArtifactCreated,
+    ComputeTarget,
     EventType,
     JobStatus,
     PipelineMode,
@@ -70,6 +71,7 @@ def export_bundle(
                 {
                     "format": BUNDLE_FORMAT,
                     "exported_at": datetime.now(UTC).isoformat(),
+                    "location": client.location.value,
                     "lease": json.loads(stored.model_dump_json()),
                 },
                 indent=2,
@@ -105,6 +107,7 @@ class BundleClient:
             self._in.close()
             raise BundleError(f"Unsupported bundle format: {meta.get('format')!r}.")
         self.lease = WorkerLease.model_validate(meta["lease"])
+        self.location = ComputeTarget(meta.get("location", ComputeTarget.LOCAL.value))
         self._out_path = out
         self._tmp = out.with_name(out.name + ".part")
         self._out = zipfile.ZipFile(self._tmp, "w", zipfile.ZIP_DEFLATED)
@@ -185,6 +188,7 @@ class BundleClient:
                     "format": RESULT_FORMAT,
                     "job_id": self.lease.job_id,
                     "pipeline": self.lease.pipeline.value,
+                    "location": self.location.value,
                     "video_sha256": self.lease.video_sha256,
                     "worker_id": worker_id,
                     "geometry": (
@@ -225,7 +229,12 @@ def import_result(client: WorkerClient, result: Path, worker_id: str) -> str:
         for op in meta["ops"]:  # check every artifact before anything is sent
             if op["op"] == "artifact":
                 _check_artifact(zf, op)
-        lease = client.lease(worker_id, [PipelineMode(meta["pipeline"])], job_id=job_id)
+        lease = client.lease(
+            worker_id,
+            [PipelineMode(meta["pipeline"])],
+            job_id=job_id,
+            location=ComputeTarget(meta.get("location", ComputeTarget.LOCAL.value)),
+        )
         if lease is None:
             raise BundleError(
                 f"Job {job_id} cannot be leased: it is still held by the export lease (wait a "

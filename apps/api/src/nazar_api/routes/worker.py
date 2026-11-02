@@ -34,6 +34,7 @@ from nazar_contracts import (
     ArtifactCreated,
     ArtifactKind,
     AssetStatus,
+    ComputeTarget,
     EventType,
     JobStatus,
     PipelineMode,
@@ -52,6 +53,7 @@ def require_worker(
     request: Request,
     settings: SettingsDep,
     authorization: Annotated[str | None, Header()] = None,
+    x_nazar_worker_location: Annotated[str | None, Header()] = None,
 ) -> None:
     expected = settings.worker_token
     if expected is None:
@@ -63,7 +65,13 @@ def require_worker(
         token.encode(), expected.get_secret_value().encode()
     ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid worker token.")
-    request.app.state.worker_seen_at = utcnow()
+    try:
+        location = ComputeTarget(x_nazar_worker_location or ComputeTarget.LOCAL.value)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "X-Nazar-Worker-Location must be local or college."
+        ) from None
+    request.app.state.worker_seen_at[location] = utcnow()
 
 
 router = APIRouter(prefix="/api/worker", tags=["worker"], dependencies=[Depends(require_worker)])
@@ -92,8 +100,10 @@ def lease(
     body: WorkerLeaseRequest, request: Request, db: DbDep, settings: SettingsDep
 ) -> WorkerLease | Response:
     if body.geometry is not None:
-        request.app.state.worker_geometry = body.geometry
-    got = lease_next(db, body.worker_id, body.modes, settings.worker_lease_seconds, body.job_id)
+        request.app.state.worker_geometry[body.location] = body.geometry
+    got = lease_next(
+        db, body.worker_id, body.modes, settings.worker_lease_seconds, body.job_id, body.location
+    )
     if got is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     job = got.job

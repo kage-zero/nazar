@@ -87,6 +87,7 @@ def create_job(mission_id: str, body: JobCreate, user: UserDep, db: DbDep) -> Jo
         video_asset_id=video.id,
         telemetry_asset_id=telemetry,
         pipeline=body.pipeline.value,
+        compute=body.compute.value,
         status=JobStatus.CREATED.value,
         attempt=1,
         last_seq=0,

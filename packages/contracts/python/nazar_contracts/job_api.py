@@ -20,7 +20,7 @@ from nazar_contracts.artifacts import (
     Provenance,
 )
 from nazar_contracts.events import EventType, StageProgressData, WarningData
-from nazar_contracts.jobs import JobStatus, StageName
+from nazar_contracts.jobs import ComputeTarget, JobStatus, StageName
 
 
 class _Model(BaseModel):
@@ -71,6 +71,9 @@ class Job(_Model):
     mission_id: str
     status: JobStatus
     pipeline: PipelineMode
+    compute: ComputeTarget = Field(
+        default=ComputeTarget.LOCAL, description="Which worker location runs this job."
+    )
     attempt: int = Field(ge=1)
     last_seq: int = Field(ge=0, description="Cursor of the newest event; resume after it.")
     stages: list[StageState]
@@ -86,6 +89,10 @@ class JobCreate(_Model):
     """Start reconstruction of the mission's validated video."""
 
     pipeline: PipelineMode
+    compute: ComputeTarget = Field(
+        default=ComputeTarget.LOCAL,
+        description="Run on the local GPU worker or the college GPU worker (online or bundle).",
+    )
 
 
 # --- Worker protocol -------------------------------------------------------------------
@@ -101,6 +108,9 @@ class WorkerLeaseRequest(_Model):
     job_id: str | None = Field(
         default=None,
         description="Lease only this queued job (offline bundle import); absent: oldest first.",
+    )
+    location: ComputeTarget = Field(
+        default=ComputeTarget.LOCAL, description="Only jobs aimed at this location are leased."
     )
 
 

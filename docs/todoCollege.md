@@ -70,8 +70,8 @@ uv run python scripts/setup_fast3r.py --check  # must end with "Fast3R runtime O
 - If Hugging Face is blocked: upload `var/gpu/weights/Fast3R_ViT_Large_512/` (≈ 2.5 GB) via
   portal Storage, then `--check --hash`.
 - [ ] One measured run of sample1:
-  - online: `NAZAR_WORKER_TOKEN=<type it> uv run nazar-worker run --api http://<laptop IP>:8000 --modes standard`, then Reconstruct in the laptop browser;
-  - bundle: `uv run nazar-worker bundle run mission.zip --out result.zip`, then import on the laptop;
+  - online: `NAZAR_WORKER_TOKEN=<type it> uv run nazar-worker run --api http://<laptop IP>:8000 --modes standard --location college`, then in the laptop browser set **Run on → College GPU** and press Reconstruct (the panel shows whether the college worker is online);
+  - bundle: on the laptop choose **Run on → College GPU**, press Reconstruct, then `bundle export` (it takes college jobs by default); in the VDI `uv run nazar-worker bundle run mission.zip --out result.zip`; import on the laptop;
   - record geometry time, passes, peak VRAM (`nvidia-smi`) vs laptop: sample1 13.8 s,
     4 passes, 3,149 MiB.
 

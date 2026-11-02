@@ -89,6 +89,11 @@ export function App() {
                 canStart={readyVideo !== null}
                 stream={job.stream}
                 error={job.error}
+                workers={
+                  status.state === 'ready' || status.state === 'not-ready'
+                    ? (status.readiness.workers ?? [])
+                    : []
+                }
                 onStart={job.start}
                 onCancel={job.cancel}
                 onRetry={job.retry}

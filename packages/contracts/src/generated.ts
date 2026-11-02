@@ -57,6 +57,10 @@ export type EventType =
   | 'cancel.requested'
   | 'job.cancelled';
 /**
+ * Which worker location runs this job.
+ */
+export type ComputeTarget = 'local' | 'college';
+/**
  * Which stage implementations a job uses.
  *
  * - `test`: deterministic test pipeline. Emits small real-format fixture artifacts through
@@ -146,6 +150,21 @@ export type WarningSeverity = 'info' | 'warning' | 'blocking';
  */
 export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' | 'not_implemented';
 /**
+ * What a worker's standard pipeline would use for geometry right now.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "GeometryBackend".
+ */
+export type GeometryBackend = 'fast3r' | 'cpu-baseline';
+/**
+ * Where a job's GPU work runs. Each worker declares its location and only leases jobs
+ * aimed at it (the API never moves a job between locations on its own).
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "ComputeTarget".
+ */
+export type ComputeTarget1 = 'local' | 'college';
+/**
  * Altitudes keep their meaning: height above take-off is not sea-level or ellipsoidal.
  *
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -153,12 +172,10 @@ export type CheckStatus = 'ok' | 'degraded' | 'unavailable' | 'not_configured' |
  */
 export type AltitudeKind = 'relative_to_takeoff' | 'absolute_unspecified_datum' | 'none';
 /**
- * What a worker's standard pipeline would use for geometry right now.
- *
- * This interface was referenced by `NazarContracts`'s JSON-Schema
- * via the `definition` "GeometryBackend".
+ * Where a job's GPU work runs. Each worker declares its location and only leases jobs
+ * aimed at it (the API never moves a job between locations on its own).
  */
-export type GeometryBackend = 'fast3r' | 'cpu-baseline';
+export type ComputeTarget2 = 'local' | 'college';
 
 /**
  * Bundle that pulls every public contract into one schema document.
@@ -446,6 +463,7 @@ export interface Job {
    */
   artifacts: ArtifactManifest[];
   attempt: number;
+  compute?: ComputeTarget;
   created_at: string;
   error?: string | null;
   id: string;
@@ -878,6 +896,10 @@ export interface PreflightWarning {
 export interface ReadinessResponse {
   checks: ReadinessCheck[];
   ready: boolean;
+  /**
+   * One entry per compute location.
+   */
+  workers?: WorkerPresence[];
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -888,6 +910,24 @@ export interface ReadinessCheck {
   name: string;
   required: boolean;
   status: CheckStatus;
+}
+/**
+ * Whether a worker at this location polled the API recently (presence, not a secret).
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "WorkerPresence".
+ */
+export interface WorkerPresence {
+  /**
+   * Geometry backend it reported for standard jobs (None: not reported).
+   */
+  geometry: GeometryBackend | null;
+  /**
+   * Seconds since its last call; None: never.
+   */
+  last_seen_s: number | null;
+  location: ComputeTarget1;
+  online: boolean;
 }
 /**
  * Computed from the normalised track. Times are seconds since the video started.
@@ -1024,6 +1064,7 @@ export interface WorkerLeaseRequest {
    * Lease only this queued job (offline bundle import); absent: oldest first.
    */
   job_id?: string | null;
+  location?: ComputeTarget2;
   /**
    * @minItems 1
    */

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from nazar_contracts import (
     ArtifactCreate,
     ArtifactCreated,
+    ComputeTarget,
     GeometryBackend,
     PipelineMode,
     WorkerEvent,
@@ -62,6 +63,7 @@ class WorkerClient:
         attempts: int = 4,
         timeout_s: float = 60.0,
         transport: Transport | None = None,
+        location: ComputeTarget = ComputeTarget.LOCAL,
     ) -> None:
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("The API URL must start with http:// or https://")
@@ -71,6 +73,8 @@ class WorkerClient:
         self._timeout = timeout_s
         self._transport = transport or self._urllib
         self.lease_id: str | None = None
+        self.location = location
+        """Where this worker runs; it only leases jobs started for this location."""
 
     def _urllib(
         self, method: str, url: str, body: bytes | None, headers: dict[str, str]
@@ -93,6 +97,7 @@ class WorkerClient:
         headers = {
             "Authorization": f"Bearer {self._token}",
             "X-Nazar-Request": "1",
+            "X-Nazar-Worker-Location": self.location.value,
             "Content-Type": content_type,
         }
         if self.lease_id:
@@ -127,10 +132,16 @@ class WorkerClient:
         modes: list[PipelineMode],
         geometry: GeometryBackend | None = None,
         job_id: str | None = None,
+        location: ComputeTarget | None = None,
     ) -> WorkerLease | None:
+        """`location` overrides this client's own (bundle import acts for the college)."""
         self.lease_id = None
         body = WorkerLeaseRequest(
-            worker_id=worker_id, modes=modes, geometry=geometry, job_id=job_id
+            worker_id=worker_id,
+            modes=modes,
+            geometry=geometry,
+            job_id=job_id,
+            location=location or self.location,
         )
         got = self._json("POST", "/api/worker/lease", body)
         if got is None:

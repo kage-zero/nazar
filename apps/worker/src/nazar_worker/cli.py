@@ -7,7 +7,7 @@ import socket
 import sys
 from pathlib import Path
 
-from nazar_contracts import PipelineMode
+from nazar_contracts import ComputeTarget, PipelineMode
 from nazar_worker import __version__
 from nazar_worker.bundle import BundleError, export_bundle, import_result, run_bundle
 from nazar_worker.client import ApiCallFailed, WorkerClient
@@ -78,6 +78,13 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--poll", type=float, default=2.0, help="Seconds between empty polls.")
     run.add_argument("--heartbeat", type=float, default=10.0, help="Lease renewal interval (s).")
     run.add_argument("--once", action="store_true", help="Handle at most one job, then exit.")
+    run.add_argument(
+        "--location",
+        choices=[c.value for c in ComputeTarget],
+        default=os.environ.get("NAZAR_WORKER_LOCATION", ComputeTarget.LOCAL.value),
+        help="Where this worker runs; it only takes jobs started for this GPU (default: local, "
+        "or NAZAR_WORKER_LOCATION).",
+    )
     _bundle_parser(sub)
     args = parser.parse_args(argv)
 
@@ -121,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(runtime, Fast3rRuntime)
             else f"CPU baseline. {runtime}",
         )
-    client = WorkerClient(args.api, token)
+    client = WorkerClient(args.api, token, location=ComputeTarget(args.location))
+    logging.getLogger("nazar_worker").info("worker location: %s GPU", args.location)
     try:
         run_loop(
             client,
@@ -146,6 +154,12 @@ def _bundle_parser(sub: "argparse._SubParsersAction[argparse.ArgumentParser]") -
     exp.add_argument("--out", type=Path, required=True, help="Mission bundle to write (.zip).")
     exp.add_argument("--job", default=None, help="Job id (default: the oldest queued job).")
     exp.add_argument("--modes", default="standard", help="Pipelines to accept: test, standard.")
+    exp.add_argument(
+        "--location",
+        choices=[c.value for c in ComputeTarget],
+        default=ComputeTarget.COLLEGE.value,
+        help="Export a job started for this GPU (default: college).",
+    )
     run = steps.add_parser("run", help="(offline) Process a mission bundle; no network or token.")
     run.add_argument("bundle", type=Path, help="Mission bundle from `bundle export`.")
     run.add_argument("--out", type=Path, required=True, help="Result bundle to write (.zip).")
@@ -179,13 +193,14 @@ def _bundle(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    client = WorkerClient(args.api, token)
+    location = ComputeTarget(getattr(args, "location", ComputeTarget.LOCAL.value))
+    client = WorkerClient(args.api, token, location=location)
     try:
         if args.step == "export":
             modes = [PipelineMode(m.strip()) for m in args.modes.split(",") if m.strip()]
             lease = export_bundle(client, args.worker_id, args.out, modes, args.job)
             if lease is None:
-                print("No queued job to export.", file=sys.stderr)
+                print(f"No queued job for the {location.value} GPU to export.", file=sys.stderr)
                 return 1
             print(
                 f"Exported job {lease.job_id} ({lease.keyframe_count} keyframes) to {args.out}. "

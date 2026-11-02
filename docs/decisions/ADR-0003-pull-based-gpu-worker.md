@@ -24,6 +24,10 @@ The GPU worker is a process the user starts inside their VDI session (`nazar-wor
 
 Celery remains an option for CPU-side tasks co-located with the API. It is not the GPU transport, because a Celery worker in the VDI would need direct Redis access from the VDI, which is unverified.
 
+## Choosing the GPU per job (2026-11-02)
+
+Each job carries a `compute` target, `local` or `college`, chosen with the **Run on** switch next to Reconstruct (remembered per browser; default local). A worker declares its location (`nazar-worker run --location college`, or `NAZAR_WORKER_LOCATION`) and sends it on every call (`X-Nazar-Worker-Location`); it only leases jobs aimed at that location. So a laptop worker and a college worker can poll the same API without taking each other's jobs, and nothing silently falls back from the college GPU to the laptop. `bundle export` takes college jobs by default; import acts for the location recorded in the bundle. Readiness reports each location's presence and geometry backend (`workers`), which the switch shows.
+
 ## Consequences / open questions (Milestone 1)
 
 - **API reachability:** the API must be reachable _from_ the VDI, either by public HTTPS or by the API running inside the same network. This must be verified with a read-only port/HTTP test.
