@@ -80,9 +80,6 @@ PLY_NOTES = {
 OBSERVED_MIN_VIEWS = 3
 OBSERVED_MAX_PX = 1.0
 MIN_FAST3R_VIEWS = 4
-MAX_ESTIMATED_SCALE_SPREAD = 0.25
-"""Metric3D's per-view scale must agree to this relative spread to give an estimated scale."""
-MIN_ESTIMATED_SCALE_VIEWS = 3
 
 # The model stages: producer id and model name in artifact provenance.
 STAGE_MODELS = {
@@ -153,8 +150,6 @@ class _Run:
     priors: Priors | None = None
     fused: Fused | None = None
     """The fused cloud after outlier filtering (same order as `final`)."""
-    estimated_mpu: float | None = None
-    """Metres per unit estimated from Metric3D depth (used only without a sensor scale)."""
     contributions: dict[str, dict[str, Any]] = field(default_factory=dict)
     """What each stage/model added to the result, for the report."""
     gpu_peaks: dict[str, int] = field(default_factory=dict)
@@ -173,21 +168,13 @@ class _Run:
         return path
 
     def frame(self) -> CoordinateFrame:
-        """Coordinates stay local; an accepted sensor alignment adds a metric scale, and without
-        one a consistent Metric3D depth comparison adds an *estimated* scale."""
+        """Coordinates stay local; an accepted sensor alignment adds a metric scale."""
         if self.alignment is not None and self.alignment.scale_accepted:
             return CoordinateFrame(
                 type=FrameType.LOCAL_RECONSTRUCTION,
                 units="unitless",
                 scale_status=ScaleStatus.METRIC_SENSOR,
                 metres_per_unit=self.alignment.metres_per_unit,
-            )
-        if self.estimated_mpu is not None:
-            return CoordinateFrame(
-                type=FrameType.LOCAL_RECONSTRUCTION,
-                units="unitless",
-                scale_status=ScaleStatus.METRIC_ESTIMATED,
-                metres_per_unit=self.estimated_mpu,
             )
         return LOCAL_FRAME
 
@@ -952,30 +939,27 @@ class Densify(_Stage):
             run.timings["gaussian_splat_s"] = round(time.monotonic() - t1, 3)
 
     def _scale_from_priors(self, stats: dict[str, Any]) -> None:
-        """Without a sensor scale, consistent Metric3D depth gives an *estimated* scale."""
+        """Record the scale Metric3D implies. It is reported, never applied: it inherits the
+        error of Fast3R's estimated focal length, which per-view agreement cannot reveal (on
+        sample1 it came out about 2.2x smaller than the Colosseum's known size)."""
         run = self.run_state
         mpu = stats.get("metres_per_unit_estimated")
         if mpu is None or run.priors is None:
             return
-        spread = float(stats.get("scale_spread_rel", 1.0))
-        views = int(stats.get("prior_views_agreeing", 0))
-        accepted = spread <= MAX_ESTIMATED_SCALE_SPREAD and views >= MIN_ESTIMATED_SCALE_VIEWS
-        sensor = run.alignment is not None and run.alignment.scale_accepted
         detail: dict[str, Any] = {
             "metres_per_unit_estimated": mpu,
-            "scale_spread_rel": spread,
-            "views_agreeing": views,
+            "scale_spread_rel": stats.get("scale_spread_rel"),
+            "views_agreeing": stats.get("prior_views_agreeing"),
             "median_rel_err_vs_fast3r": stats.get("prior_median_rel_err"),
-            "accepted": accepted and not sensor,
-            "rule": f"per-view scale spread <= {MAX_ESTIMATED_SCALE_SPREAD} over >= "
-            f"{MIN_ESTIMATED_SCALE_VIEWS} agreeing views; never used when GNSS gave a scale",
+            "applied_to_outputs": False,
+            "why_not_applied": "Metric depth scales with the focal length, and NAZAR's is Fast3R's "
+            "estimate; agreement between views shows consistency, not absolute accuracy. Use "
+            "GNSS telemetry or a known length for metric output.",
         }
-        if sensor:
-            assert run.alignment is not None and run.alignment.metres_per_unit is not None
+        if run.alignment is not None and run.alignment.scale_accepted:
+            assert run.alignment.metres_per_unit is not None
             gnss = run.alignment.metres_per_unit
             detail["vs_gnss_scale_rel_diff"] = round(abs(mpu - gnss) / gnss, 4)
-        elif accepted:
-            run.estimated_mpu = mpu
         run.contributions.setdefault("depth_priors", {})["scale"] = detail
 
     def _splat(self, ctx: StageContext) -> None:
@@ -1246,16 +1230,6 @@ class Analysis(_Stage):
             )
             if not al.orientation_accepted:
                 ctx.warn("not_georeferenced", " ".join(al.reasons), "info")
-        elif run.estimated_mpu is not None:
-            scale = run.contributions.get("depth_priors", {}).get("scale", {})
-            ctx.warn(
-                "scale_estimated_depth",
-                f"Scale estimated from Metric3D-v2 depth (1 unit = {run.estimated_mpu:.3f} m; "
-                f"per-view spread {100 * float(scale.get('scale_spread_rel', 0)):.0f}%). It relies "
-                "on Fast3R's estimated focal length and is not georeferenced: treat distances as "
-                "rough estimates.",
-                "info",
-            )
         else:
             tail = (
                 "distances are relative (unitless). Absolute size, height and geographic "
@@ -1402,11 +1376,6 @@ class Exporting(_Stage):
         mesh = run.contributions.get("surface_processing", {})
         if mesh.get("applied"):
             report["confidence"]["mesh_vertices"] = mesh["vertex_classes"]
-        if run.frame().scale_status is ScaleStatus.METRIC_ESTIMATED:
-            limitations[1] = (
-                "Scale is estimated from Metric3D-v2 depth with Fast3R's estimated focal length; "
-                "distances are rough estimates (see contributions.depth_priors.scale)."
-            )
         if run.telemetry is not None:
             report["sensor_alignment"] = report["input"].pop("telemetry")
             report["input"]["telemetry"] = True
@@ -1439,15 +1408,6 @@ class Exporting(_Stage):
             las_note = (
                 "LAS 1.2, point format 2 (RGB). Local frame in metres (GNSS scale), not "
                 "georeferenced. Axes converted to +Z up: LAS (X, Y, Z) = NAZAR (x, -z, y)."
-            )
-        elif run.estimated_mpu is not None:
-            las = write_las(
-                pts * run.estimated_mpu, cols, labels, system_id=b"NAZAR local m (estimated)"
-            )
-            las_note = (
-                "LAS 1.2, point format 2 (RGB). Local frame in metres, scale ESTIMATED from "
-                "Metric3D-v2 depth, not georeferenced. Axes converted to +Z up: LAS (X, Y, Z) = "
-                "NAZAR (x, -z, y)."
             )
         else:
             las = write_las(pts, cols, labels)

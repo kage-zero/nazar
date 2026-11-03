@@ -317,10 +317,7 @@ def _one_line(key: str, c: dict[str, Any]) -> str:
     if key == "depth_priors":
         scale = c.get("scale", {})
         s = (
-            (
-                f", scale spread {100 * scale['scale_spread_rel']:.0f}%"
-                f"{' (used)' if scale.get('accepted') else ''}"
-            )
+            f", implied 1 unit = {scale['metres_per_unit_estimated']:.2f} m (reported only)"
             if scale
             else ""
         )
