@@ -1,18 +1,31 @@
-"""Standard pipeline: real geometry from the uploaded video's keyframes.
+"""Standard pipeline: video keyframes -> explainable 3D model, one model per stage.
 
-Geometry comes from Fast3R when this worker has the GPU runtime configured (see `fast3r.py`),
-otherwise from the classical CPU SfM baseline (`sfm.py`). When Fast3R is configured but fails
-(e.g. out of GPU memory even with smaller batches), the job falls back to the baseline and
-says so in a warning, the report and every artifact's provenance; it never substitutes
-silently. Stages whose models are not installed (Metric3D-v2, YOLO/SAM2, InstantSplat) are
-skipped with a reason, never faked.
+    preprocessing     keyframes chosen at upload
+    dynamic_analysis  YOLO + SAM 2: masks of objects that actually moved
+    geometry          Fast3R (masked): poses + dense pointmaps; CPU SfM baseline as fallback
+    depth_priors      Metric3D-v2: metric depth + normals, compared with Fast3R per view
+    sensor_opt.       Sim(3) GNSS alignment (telemetry only)
+    dense             fusion of Fast3R + priors (Open3D-ready cloud), then a Gaussian splat
+    surface           Open3D screened Poisson mesh with per-vertex confidence
+    analysis/export   confidence, per-model contributions, PLY/LAS/GLB/mesh/splat + report
+
+Each GPU model runs in its own process with its own environment (`gpu.py`) and, on the
+`local` profile, under a GPU-memory cap (`profile.py`). Every stage records what it
+contributed in the report's `contributions`. On `local`, a step that cannot fit the memory
+budget is skipped with a visible reason; on `clg` every model must run. When Fast3R fails on
+`local`, the job falls back to the CPU baseline and says so in a warning, the report and every
+artifact's provenance; it never substitutes silently.
 """
 
 import hashlib
+import io
 import json
 import platform
+import shutil
 import tempfile
 import time
+import weakref
+import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,10 +52,13 @@ from nazar_contracts import (
 from nazar_media.telemetry import track_from_json
 from nazar_worker import fast3r
 from nazar_worker.fast3r import DenseCloud, Fast3rFailed, Fast3rRuntime, run_fast3r
+from nazar_worker.fusion import SOURCE_FAST3R, Fused, Priors, fuse
 from nazar_worker.georef import Alignment, align
-from nazar_worker.glb import write_glb
+from nazar_worker.glb import write_glb, write_mesh_glb
+from nazar_worker.gpu import GpuRuntime, RunnerFailed, run_runner
 from nazar_worker.las import write_las
 from nazar_worker.ply import ESTIMATED, OBSERVED, write_ply_arrays
+from nazar_worker.profile import LOCAL, ComputeProfile
 from nazar_worker.sfm import SfmFailed, SfmSettings, Snapshot, reconstruct
 from nazar_worker.stages import StageAdapter, StageContext, StageFailed
 
@@ -64,6 +80,18 @@ PLY_NOTES = {
 OBSERVED_MIN_VIEWS = 3
 OBSERVED_MAX_PX = 1.0
 MIN_FAST3R_VIEWS = 4
+MAX_ESTIMATED_SCALE_SPREAD = 0.25
+"""Metric3D's per-view scale must agree to this relative spread to give an estimated scale."""
+MIN_ESTIMATED_SCALE_VIEWS = 3
+
+# The model stages: producer id and model name in artifact provenance.
+STAGE_MODELS = {
+    "dynamic_analysis": ("nazar-worker/yolo-sam2", "YOLO11 (Ultralytics) + SAM 2.1 (Meta)"),
+    "depth_priors": ("nazar-worker/metric3d", "Metric3D-v2"),
+    "dense_reconstruction": ("nazar-worker/fusion", "Fast3R + Metric3D-v2 fusion"),
+    "gaussian_splat": ("nazar-worker/gsplat", "3D Gaussian splatting (gsplat), InstantSplat-style"),
+    "surface_processing": ("nazar-worker/open3d-poisson", "Open3D screened Poisson"),
+}
 
 
 def _provenance(method: str) -> Provenance:
@@ -94,6 +122,10 @@ class _Run:
     """State handed from stage to stage within one job attempt."""
 
     runtime: Fast3rRuntime | str
+    profile: ComputeProfile = LOCAL
+    gpu: GpuRuntime = field(default_factory=GpuRuntime.from_env)
+    work_dir: Path | None = None
+    """Where model inputs/outputs live during the job (kept when given; else a temp dir)."""
     images: list[npt.NDArray[np.uint8]] = field(default_factory=list)
     keyframe_index: list[int] = field(default_factory=list)
     """Source video frame index of each keyframe image."""
@@ -106,7 +138,8 @@ class _Run:
     fallback_reason: str | None = None
     snapshot: Snapshot | None = None
     dense: DenseCloud | None = None
-    gpu: dict[str, Any] = field(default_factory=dict)
+    gpu_stats: dict[str, Any] = field(default_factory=dict)
+    """Fast3R runner statistics (device, load time, peak memory)."""
     keep: npt.NDArray[np.bool_] | None = None
     final: tuple[npt.NDArray[np.float64], npt.NDArray[np.uint8], npt.NDArray[np.uint8]] | None = (
         None
@@ -115,17 +148,48 @@ class _Run:
     timings: dict[str, float] = field(default_factory=dict)
     first_preview_s: float | None = None
     started: float = field(default_factory=time.monotonic)
+    masks_dir: Path | None = None
+    """Moving-object masks (one PNG per keyframe), when dynamic analysis ran."""
+    priors: Priors | None = None
+    fused: Fused | None = None
+    """The fused cloud after outlier filtering (same order as `final`)."""
+    estimated_mpu: float | None = None
+    """Metres per unit estimated from Metric3D depth (used only without a sensor scale)."""
+    contributions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """What each stage/model added to the result, for the report."""
+    gpu_peaks: dict[str, int] = field(default_factory=dict)
+    _work: Path | None = None
+
+    def work(self, sub: str = "") -> Path:
+        if self._work is None:
+            if self.work_dir is not None:
+                self._work = self.work_dir
+                self._work.mkdir(parents=True, exist_ok=True)
+            else:
+                self._work = Path(tempfile.mkdtemp(prefix="nazar-job-"))
+                weakref.finalize(self, shutil.rmtree, str(self._work), True)
+        path = self._work / sub if sub else self._work
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     def frame(self) -> CoordinateFrame:
-        """Coordinates stay local; an accepted sensor alignment adds a metric scale."""
-        if self.alignment is None or not self.alignment.scale_accepted:
-            return LOCAL_FRAME
-        return CoordinateFrame(
-            type=FrameType.LOCAL_RECONSTRUCTION,
-            units="unitless",
-            scale_status=ScaleStatus.METRIC_SENSOR,
-            metres_per_unit=self.alignment.metres_per_unit,
-        )
+        """Coordinates stay local; an accepted sensor alignment adds a metric scale, and without
+        one a consistent Metric3D depth comparison adds an *estimated* scale."""
+        if self.alignment is not None and self.alignment.scale_accepted:
+            return CoordinateFrame(
+                type=FrameType.LOCAL_RECONSTRUCTION,
+                units="unitless",
+                scale_status=ScaleStatus.METRIC_SENSOR,
+                metres_per_unit=self.alignment.metres_per_unit,
+            )
+        if self.estimated_mpu is not None:
+            return CoordinateFrame(
+                type=FrameType.LOCAL_RECONSTRUCTION,
+                units="unitless",
+                scale_status=ScaleStatus.METRIC_ESTIMATED,
+                metres_per_unit=self.estimated_mpu,
+            )
+        return LOCAL_FRAME
 
     def centres(self) -> npt.NDArray[np.float64]:
         if self.dense is not None:
@@ -148,6 +212,8 @@ class _Run:
 
     def observed_mask(self) -> npt.NDArray[np.bool_]:
         assert self.keep is not None
+        if self.final is not None:
+            return np.asarray(self.final[2] == OBSERVED)
         if self.dense is not None:
             return np.asarray(self.dense.conf[self.keep] >= fast3r.OBSERVED_MIN_CONF)
         assert self.snapshot is not None
@@ -167,7 +233,10 @@ def _declare(
     lod: int | None = None,
     final: bool = False,
     spatial: bool = False,
+    stage: str | None = None,
 ) -> ArtifactCreate:
+    """`stage` names a model stage (see STAGE_MODELS) whose model produced the artifact;
+    otherwise the geometry method is the producer."""
     box = None
     if xyz is not None and len(xyz):
         box = Bounds3D(min=xyz.min(axis=0).tolist(), max=xyz.max(axis=0).tolist())
@@ -182,9 +251,31 @@ def _declare(
         point_count=len(xyz) if xyz is not None else None,
         lod=lod,
         source_frames=frames,
-        provenance=_provenance(run.method),
+        provenance=_provenance(run.method) if stage is None else _stage_provenance(stage, run),
         final=final,
     )
+
+
+def _stage_provenance(stage: str, run: "_Run") -> Provenance:
+    producer, model = STAGE_MODELS[stage]
+    return Provenance(
+        producer=producer,
+        model=model,
+        model_version=f"profile {run.profile.name}",
+        config_hash=hashlib.sha256(
+            json.dumps(run.profile.report(), sort_keys=True).encode()
+        ).hexdigest()[:16],
+        test_pipeline=False,
+    )
+
+
+def _zip(folder: Path, pattern: str = "*") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(folder.rglob(pattern)):
+            if path.is_file():
+                zf.write(path, path.relative_to(folder).as_posix())
+    return buf.getvalue()
 
 
 def _frames(run: _Run, used: list[int] | None = None) -> FrameRange | None:
@@ -200,6 +291,73 @@ class _Stage:
 
     def skip_reason(self, lease: WorkerLease) -> str | None:
         return None
+
+    def _missing_or_skip(self, missing: str | None) -> str | None:
+        """A model that is not installed: skipped with the reason on `local`; on `clg` the
+        stage starts and fails, because that profile must run every model."""
+        return missing if missing and not self.run_state.profile.strict else None
+
+    def _skipped(self, key: str, reason: str | None) -> str | None:
+        """Record a skip (with its reason) for the report, and return the reason."""
+        if reason is not None:
+            self.run_state.contributions[key] = {"applied": False, "reason": reason}
+        return reason
+
+    def _require(self, missing: str | None, what: str) -> None:
+        if missing:
+            raise StageFailed(
+                f"{what}: {missing} The {self.run_state.profile.name} profile runs every model."
+            )
+
+    def _gpu_step(
+        self,
+        ctx: StageContext,
+        key: str,
+        what: str,
+        script: str,
+        args: list[str],
+        steps: dict[str, tuple[str, str]],
+        *,
+        splat: bool = False,
+    ) -> dict[str, Any] | None:
+        """Run a GPU runner. Returns its result, or None when the step did not fit the local
+        GPU-memory budget (then it is skipped visibly). Any other failure fails the job."""
+        run = self.run_state
+        python = run.gpu.splat_python if splat else run.gpu.main_python
+        assert python is not None
+
+        def on_event(event: dict[str, Any]) -> None:
+            kind = event.get("event")
+            if kind == "progress" and event.get("step") in steps:
+                message, unit = steps[str(event["step"])]
+                ctx.progress(message, event.get("done"), event.get("total"), unit)
+            elif kind == "loaded":
+                ctx.progress(f"{what}: model loaded ({event.get('model', 'ok')})", None, None, None)
+            elif kind == "retry":
+                ctx.warn(
+                    f"{key}_retry",
+                    f"{what}: {event.get('reason', 'retrying')}; continuing with "
+                    f"{event.get('gaussians') or event.get('model') or 'smaller settings'}.",
+                    "info",
+                )
+
+        try:
+            done = run_runner(python, script, args, ctx.check_cancel, on_event)
+        except RunnerFailed as exc:
+            budget = run.profile.vram_budget_mib
+            if exc.oom and not run.profile.strict:
+                reason = (
+                    f"{what} needs more GPU memory than the local budget ({budget} MiB), so it "
+                    f"was skipped on the local GPU; the college profile runs it. ({exc})"
+                )
+                ctx.warn(f"{key}_skipped_gpu_memory", reason[:480], "warning")
+                run.contributions[key] = {"applied": False, "reason": reason}
+                return None
+            where = "on the college GPU" if run.profile.strict else "on the local GPU"
+            raise StageFailed(f"{what} failed {where}: {exc}", retryable=True) from exc
+        if done.get("peak_vram_mib") is not None:
+            run.gpu_peaks[key] = int(done["peak_vram_mib"])
+        return done
 
 
 class Preprocessing(_Stage):
@@ -220,11 +378,101 @@ class Preprocessing(_Stage):
             if img is None:
                 raise StageFailed(f"Keyframe {kf['image']} could not be decoded.")
             self.run_state.images.append(img.astype(np.uint8))
+            cv2.imwrite(
+                str(self.run_state.work("frames") / f"{n - 1:04d}.jpg"),
+                img,
+                [cv2.IMWRITE_JPEG_QUALITY, 95],
+            )
             self.run_state.keyframe_index.append(int(kf["index"]))
             self.run_state.keyframe_times.append(float(kf["t"]))
             if n % 8 == 0 or n == len(keyframes):
                 ctx.progress("Loaded keyframes from preflight", n, len(keyframes), "keyframes")
         self.run_state.timings["preprocessing_s"] = round(time.monotonic() - t0, 3)
+
+
+class DynamicAnalysis(_Stage):
+    """YOLO candidates -> motion check against neighbouring keyframes -> SAM 2 masks. The masks
+    run *before* geometry, so moving objects affect neither Fast3R's poses nor the cloud."""
+
+    def _missing(self) -> str | None:
+        p, g = self.run_state.profile, self.run_state.gpu
+        return g.missing(f"yolo/{p.yolo_weights}", f"sam2/{p.sam2_checkpoint}")
+
+    def skip_reason(self, lease: WorkerLease) -> str | None:
+        return self._skipped("dynamic_analysis", self._missing_or_skip(self._missing()))
+
+    def run(self, ctx: StageContext) -> None:
+        run = self.run_state
+        self._require(self._missing(), "Moving-object masking cannot run")
+        t0 = time.monotonic()
+        out = run.work("dynamic")
+        n = len(run.images)
+        ctx.progress("YOLO: looking for objects that can move", 0, n, "keyframes")
+        done = self._gpu_step(
+            ctx,
+            "dynamic_analysis",
+            "YOLO + SAM 2 masking",
+            "dynamic_runner.py",
+            [
+                "--frames",
+                str(run.work("frames")),
+                "--out",
+                str(out),
+                "--yolo",
+                str(run.gpu.weights / "yolo" / run.profile.yolo_weights),
+                "--sam2-ckpt",
+                str(run.gpu.weights / "sam2" / run.profile.sam2_checkpoint),
+                "--sam2-cfg",
+                run.profile.sam2_config,
+                "--imgsz",
+                str(run.profile.yolo_imgsz),
+                "--budget-mib",
+                str(run.profile.vram_budget_mib),
+            ],
+            {
+                "detect": ("YOLO: detecting vehicles, people and boats", "keyframes"),
+                "segment": ("SAM 2: segmenting the objects that moved", "keyframes"),
+            },
+        )
+        if done is None:
+            return
+        run.masks_dir = out / "masks"
+        objects = done["objects"]
+        ctx.progress(
+            f"{objects['moving']} moving, {objects['static']} static and {objects['unknown']} "
+            f"undecided objects; {100 * done['masked_pixel_share']:.2f}% of pixels masked",
+            n,
+            n,
+            "keyframes",
+        )
+        archive = _zip(out)
+        ctx.publish(
+            _declare(
+                run,
+                "dynamic-masks",
+                ArtifactKind.DYNAMIC_MASKS,
+                "application/zip",
+                archive,
+                frames=_frames(run),
+                final=True,
+                stage="dynamic_analysis",
+            ),
+            archive,
+        )
+        run.contributions["dynamic_analysis"] = {
+            "applied": True,
+            "what": "Masks of objects that moved between keyframes; they are excluded from "
+            "Fast3R's poses, the point cloud, the mesh and the splat's training loss.",
+            "detections": done["detections"],
+            "objects": objects,
+            "frames_with_moving_objects": done["frames_with_moving_objects"],
+            "masked_pixel_share": done["masked_pixel_share"],
+            "rule": "moving = the object left its ground spot in a neighbouring keyframe "
+            "(ground-plane homography; no same-class detection overlaps there and the image "
+            "patch changed); parked objects are kept; no usable neighbour = undecided, kept.",
+            "peak_vram_mib": done.get("peak_vram_mib"),
+        }
+        run.timings["dynamic_analysis_s"] = round(time.monotonic() - t0, 3)
 
 
 class Geometry(_Stage):
@@ -236,12 +484,20 @@ class Geometry(_Stage):
     def run(self, ctx: StageContext) -> None:
         run = self.run_state
         t0 = time.monotonic()
+        if not isinstance(run.runtime, Fast3rRuntime) and run.profile.strict:
+            raise StageFailed(
+                f"Fast3R cannot run: {run.runtime} The {run.profile.name} profile runs every model."
+            )
         if isinstance(run.runtime, Fast3rRuntime):
             try:
                 self._fast3r(ctx, run.runtime)
             except Fast3rFailed as exc:
+                if run.profile.strict:
+                    raise StageFailed(
+                        f"Fast3R failed on the college GPU: {exc}", retryable=True
+                    ) from exc
                 run.fallback_reason = str(exc)
-                run.dense, run.gpu = None, {}
+                run.dense, run.gpu_stats = None, {}
                 ctx.warn(
                     "fast3r_fallback",
                     "Fast3R could not run on this job, so the CPU baseline (classical "
@@ -251,20 +507,41 @@ class Geometry(_Stage):
         if run.dense is None:
             run.method = SFM
             self._sfm(ctx)
+            run.contributions["geometry"] = {
+                "applied": True,
+                "method": MODELS[SFM],
+                "what": "Sparse camera poses and feature points (CPU fallback).",
+                "fallback_reason": run.fallback_reason,
+            }
+        else:
+            stats = run.dense.stats
+            run.contributions["geometry"] = {
+                "applied": True,
+                "method": MODELS[FAST3R],
+                "what": "Camera poses and dense per-pixel pointmaps: the base geometry.",
+                "placed_keyframes": stats.get("placed_keyframes"),
+                "pixels_kept": stats.get("pixels_kept"),
+                "passes": stats.get("chunks"),
+                "views_per_pass": stats.get("max_views"),
+                "moving_object_masks_used": run.masks_dir is not None,
+                "peak_vram_mib": stats.get("peak_vram_mib"),
+            }
+            if stats.get("peak_vram_mib") is not None:
+                run.gpu_peaks["geometry"] = int(stats["peak_vram_mib"])
         run.timings["geometry_s"] = round(time.monotonic() - t0, 3)
 
     def _fast3r(self, ctx: StageContext, runtime: Fast3rRuntime) -> None:
         run = self.run_state
         run.method = FAST3R
         total = len(run.images)
-        max_views = runtime.max_views
+        max_views = runtime.max_views or run.profile.fast3r_max_views
         while True:
             per_pass = f"{max_views} views per pass" if max_views else "sizing passes to GPU memory"
             ctx.progress(f"Fast3R: loading the model ({per_pass})", 0, total, "keyframes")
 
             def on_event(event: dict[str, Any]) -> None:
                 if event.get("event") == "loaded":
-                    run.gpu.update(device=event.get("device"), load_s=event.get("seconds"))
+                    run.gpu_stats.update(device=event.get("device"), load_s=event.get("seconds"))
                     ctx.progress("Fast3R: predicting pointmaps", 0, total, "keyframes")
                 elif event.get("event") == "retry":
                     ctx.warn(
@@ -275,19 +552,20 @@ class Geometry(_Stage):
                     )
 
             try:
-                with tempfile.TemporaryDirectory(prefix="nazar-fast3r-") as tmp:
-                    for cloud in run_fast3r(
-                        runtime,
-                        run.images,
-                        Path(tmp),
-                        ctx.check_cancel,
-                        on_event,
-                        max_views=max_views,
-                    ):
-                        if cloud.final:
-                            run.dense = cloud
-                        else:
-                            self._preview(ctx, cloud.points, cloud.colors, cloud.views, total)
+                for cloud in run_fast3r(
+                    runtime,
+                    run.images,
+                    run.work("fast3r"),
+                    ctx.check_cancel,
+                    on_event,
+                    max_views=max_views,
+                    masks=run.masks_dir,
+                    budget_mib=run.profile.vram_budget_mib,
+                ):
+                    if cloud.final:
+                        run.dense = cloud
+                    else:
+                        self._preview(ctx, cloud.points, cloud.colors, cloud.views, total)
                 break
             except Fast3rFailed as exc:
                 ran = exc.max_views or max_views
@@ -301,7 +579,7 @@ class Geometry(_Stage):
                     "info",
                 )
         assert run.dense is not None
-        run.gpu.update(run.dense.stats)
+        run.gpu_stats.update(run.dense.stats)
         self._preview(ctx, run.dense.points, run.dense.colors, run.dense.views, total)
 
     def _sfm(self, ctx: StageContext) -> None:
@@ -368,6 +646,127 @@ class Geometry(_Stage):
         )
 
 
+class DepthPriors(_Stage):
+    """Metric3D-v2 metric depth + surface normals per keyframe. They are compared with Fast3R
+    view by view during fusion (scale evidence), give the mesher its normals, and fill holes
+    where Fast3R had no confident pixels."""
+
+    def _missing(self) -> str | None:
+        run = self.run_state
+        names = {
+            "vit_small": "metric_depth_vit_small_800k.pth",
+            "vit_large": "metric_depth_vit_large_800k.pth",
+            "vit_giant2": "metric_depth_vit_giant2_800k.pth",
+        }
+        have = [
+            m
+            for m in run.profile.metric3d_models
+            if (run.gpu.weights / "metric3d" / names[m]).is_file()
+        ]
+        if not (run.gpu.root / "metric3d-src" / "hubconf.py").is_file():
+            return "The Metric3D source checkout is not installed on this worker."
+        if not have:
+            wanted = ", ".join(run.profile.metric3d_models)
+            return f"No Metric3D-v2 weights for {wanted} are installed."
+        return run.gpu.missing()
+
+    def skip_reason(self, lease: WorkerLease) -> str | None:
+        if self.run_state.dense is None:
+            return self._skipped(
+                "depth_priors",
+                "Depth priors are compared with Fast3R's cameras and pointmaps; the CPU baseline "
+                "ran instead, so there is nothing to compare them with.",
+            )
+        return self._skipped("depth_priors", self._missing_or_skip(self._missing()))
+
+    def run(self, ctx: StageContext) -> None:
+        run = self.run_state
+        self._require(self._missing(), "Metric3D-v2 cannot run")
+        dense = run.dense
+        assert dense is not None and dense.npz is not None
+        t0 = time.monotonic()
+        data = np.load(dense.npz)
+        width_in, height_in = (float(a) for a in data["input_size"])
+        intr: dict[str, dict[str, float]] = {}
+        for v, kf in enumerate(int(k) for k in data["views"]):
+            factor, left, top = (float(a) for a in data["crop"][v])
+            intr[f"{kf:04d}.jpg"] = {
+                "fx": float(data["focal"][v]) / factor,
+                "cx": (width_in / 2 + left) / factor,
+                "cy": (height_in / 2 + top) / factor,
+            }
+        frames = run.work("depth-frames")
+        for name in intr:
+            shutil.copy2(run.work("frames") / name, frames / name)
+        (run.work() / "intrinsics.json").write_text(json.dumps(intr), encoding="utf-8")
+        out = run.work("depth")
+        n = len(intr)
+        ctx.progress("Metric3D-v2: loading the depth model", 0, n, "keyframes")
+        done = self._gpu_step(
+            ctx,
+            "depth_priors",
+            "Metric3D-v2 depth priors",
+            "metric3d_runner.py",
+            [
+                "--frames",
+                str(frames),
+                "--intrinsics",
+                str(run.work() / "intrinsics.json"),
+                "--src",
+                str(run.gpu.root / "metric3d-src"),
+                "--weights",
+                str(run.gpu.weights / "metric3d"),
+                "--out",
+                str(out),
+                "--models",
+                ",".join(run.profile.metric3d_models),
+                "--budget-mib",
+                str(run.profile.vram_budget_mib),
+            ],
+            {"infer": ("Metric3D-v2: metric depth and normals", "keyframes")},
+        )
+        if done is None:
+            return
+        depth: dict[int, npt.NDArray[np.float32]] = {}
+        normals: dict[int, npt.NDArray[np.float32]] = {}
+        for name in intr:
+            arr = np.load(out / name.replace(".jpg", ".npz"))
+            kf = int(name[:4])
+            depth[kf] = arr["depth"].astype(np.float32)
+            normals[kf] = arr["normals"].astype(np.float32)
+        run.priors = Priors(depth, normals, str(done["model"]), done)
+        archive = _zip(out, "*.jpg")
+        ctx.publish(
+            _declare(
+                run,
+                "depth-previews",
+                ArtifactKind.DEPTH_MAPS,
+                "application/zip",
+                archive,
+                frames=_frames(run, list(depth)),
+                final=True,
+                stage="depth_priors",
+            ),
+            archive,
+        )
+        run.contributions["depth_priors"] = {
+            "applied": True,
+            "model": done["model"],
+            "variants_tried": done.get("tried"),
+            "what": "Per-pixel metric depth and surface normals (camera frame) per keyframe; "
+            "fusion compares them with Fast3R and the mesher uses the normals.",
+            "normal_convention_detected": done.get("normal_convention"),
+            "normals_facing_camera": done.get("normals_facing_camera"),
+            "peak_vram_mib": done.get("peak_vram_mib"),
+            "note": "Metric only as far as the intrinsics are right; NAZAR's are Fast3R's "
+            "estimate, so anything derived is labelled estimated.",
+        }
+        ctx.progress(
+            f"Metric3D-v2 ({done['model']}): depth and normals for {n} keyframes", n, n, "keyframes"
+        )
+        run.timings["depth_priors_s"] = round(time.monotonic() - t0, 3)
+
+
 class SensorOptimization(_Stage):
     """Similarity alignment of the camera path to GNSS telemetry (see georef.py). Accepted
     claims add a metric scale (and an ENU georeference for exports); rejected ones keep the
@@ -375,7 +774,9 @@ class SensorOptimization(_Stage):
     Sim(3) is the honest model for a single video with consumer GNSS."""
 
     def skip_reason(self, lease: WorkerLease) -> str | None:
-        return None if lease.telemetry_asset_id else "No telemetry was supplied with this mission."
+        if lease.telemetry_asset_id:
+            return None
+        return self._skipped("sensor_optimization", "No telemetry was supplied with this mission.")
 
     def run(self, ctx: StageContext) -> None:
         run = self.run_state
@@ -432,33 +833,71 @@ class SensorOptimization(_Stage):
 
 
 class Densify(_Stage):
-    """Statistical outlier removal on the final cloud, published with the camera path. For
-    Fast3R the cloud is already dense (pointmaps, voxel-averaged); for the baseline it is the
-    sparse SfM cloud. No Gaussian/neural scene is built yet."""
+    """The dense scene. With Fast3R: the pointmaps are fused with the Metric3D-v2 priors
+    (normals, scale evidence, hole fill; moving objects excluded), outlier-filtered and
+    published with the camera path, then a Gaussian splat is trained on that cloud and the
+    keyframes. With the CPU baseline: the sparse SfM cloud, filtered."""
 
     def run(self, ctx: StageContext) -> None:
         run = self.run_state
         t0 = time.monotonic()
+        source: npt.NDArray[np.uint8] | None = None
         if run.dense is not None:
-            pts, cols = run.dense.points, run.dense.colors
-            centers, focal = run.dense.centers, run.dense.focal_px
+            dense = run.dense
+            assert dense.npz is not None and dense.transform is not None
+            with_priors = run.priors is not None
+            ctx.progress(
+                "Fusing Fast3R pointmaps"
+                + (" with Metric3D-v2 depth and normals" if with_priors else ""),
+                None,
+                None,
+                None,
+            )
+            fused = fuse(
+                dense.npz, dense.transform, dense.keep_thr, run.priors, run.profile.max_fused_points
+            )
+            keep = _statistical_inliers(fused.points)
+            run.fused = Fused(
+                fused.points[keep],
+                fused.colors[keep],
+                fused.conf[keep],
+                fused.normals[keep],
+                fused.source[keep],
+                fused.cameras[keep],
+                fused.stats,
+            )
+            pts, cols, source = run.fused.points, run.fused.colors, run.fused.source
+            observed = (source == SOURCE_FAST3R) & (run.fused.conf >= fast3r.OBSERVED_MIN_CONF)
+            labels = np.where(observed, OBSERVED, ESTIMATED).astype(np.uint8)
+            centers, focal = dense.centers, dense.focal_px
+            self._scale_from_priors(fused.stats)
+            run.contributions["dense_reconstruction"] = {
+                "applied": True,
+                "what": "One cloud from all views: Fast3R points (moving objects removed), "
+                "Metric3D normals attached, low-confidence holes filled from the scaled prior.",
+                **fused.stats,
+                "outliers_removed": int((~keep).sum()),
+                "final_points": int(keep.sum()),
+                "from_depth_prior": int((source != SOURCE_FAST3R).sum()),
+            }
         else:
             assert run.snapshot is not None
             pts, cols = run.snapshot.points, run.snapshot.colors
             centers, focal = run.snapshot.centers, run.snapshot.focal_px
-        keep = _statistical_inliers(pts)
+            keep = _statistical_inliers(pts)
+            pts, cols = pts[keep], cols[keep]
+            run.keep = keep
+            labels = np.where(run.observed_mask(), OBSERVED, ESTIMATED).astype(np.uint8)
         run.keep = keep
-        pts, cols = pts[keep], cols[keep]
-        what = "dense Fast3R cloud" if run.dense is not None else "sparse cloud"
+        what = "fused dense cloud" if run.dense is not None else "sparse cloud"
         ctx.progress(
             f"Filtered {what} ({int((~keep).sum()):,} outliers removed)",
             int(keep.sum()),
             len(keep),
             "points",
         )
-        labels = np.where(run.observed_mask(), OBSERVED, ESTIMATED).astype(np.uint8)
         run.final = (pts, cols, labels)
-        ply = write_ply_arrays(pts, cols, [PLY_NOTES[run.method]], labels)
+        ply = write_ply_arrays(pts, cols, [PLY_NOTES[run.method]], labels, source)
         ctx.publish(
             _declare(
                 run,
@@ -477,7 +916,7 @@ class Densify(_Stage):
             {"keyframe": i, "frame_index": run.keyframe_index[i], "position": c.round(5).tolist()}
             for i, c in zip(run.placed(), centers, strict=True)
         ]
-        source = (
+        cam_source = (
             "Camera poses estimated by Fast3R (PnP on its pointmaps)"
             if run.method == FAST3R
             else "Camera centres from the classical SfM baseline"
@@ -487,7 +926,7 @@ class Densify(_Stage):
                 "frame": "local_reconstruction",
                 "units": "unitless",
                 "metres_per_unit": run.frame().metres_per_unit,
-                "note": f"{source}, same frame as the cloud.",
+                "note": f"{cam_source}, same frame as the cloud.",
                 "focal_px_estimated": round(focal, 2),
                 "poses": poses,
             },
@@ -507,6 +946,273 @@ class Densify(_Stage):
             traj,
         )
         run.timings["dense_reconstruction_s"] = round(time.monotonic() - t0, 3)
+        if run.dense is not None:
+            t1 = time.monotonic()
+            self._splat(ctx)
+            run.timings["gaussian_splat_s"] = round(time.monotonic() - t1, 3)
+
+    def _scale_from_priors(self, stats: dict[str, Any]) -> None:
+        """Without a sensor scale, consistent Metric3D depth gives an *estimated* scale."""
+        run = self.run_state
+        mpu = stats.get("metres_per_unit_estimated")
+        if mpu is None or run.priors is None:
+            return
+        spread = float(stats.get("scale_spread_rel", 1.0))
+        views = int(stats.get("prior_views_agreeing", 0))
+        accepted = spread <= MAX_ESTIMATED_SCALE_SPREAD and views >= MIN_ESTIMATED_SCALE_VIEWS
+        sensor = run.alignment is not None and run.alignment.scale_accepted
+        detail: dict[str, Any] = {
+            "metres_per_unit_estimated": mpu,
+            "scale_spread_rel": spread,
+            "views_agreeing": views,
+            "median_rel_err_vs_fast3r": stats.get("prior_median_rel_err"),
+            "accepted": accepted and not sensor,
+            "rule": f"per-view scale spread <= {MAX_ESTIMATED_SCALE_SPREAD} over >= "
+            f"{MIN_ESTIMATED_SCALE_VIEWS} agreeing views; never used when GNSS gave a scale",
+        }
+        if sensor:
+            assert run.alignment is not None and run.alignment.metres_per_unit is not None
+            gnss = run.alignment.metres_per_unit
+            detail["vs_gnss_scale_rel_diff"] = round(abs(mpu - gnss) / gnss, 4)
+        elif accepted:
+            run.estimated_mpu = mpu
+        run.contributions.setdefault("depth_priors", {})["scale"] = detail
+
+    def _splat(self, ctx: StageContext) -> None:
+        run = self.run_state
+        dense, fused = run.dense, run.fused
+        assert dense is not None and dense.npz is not None and dense.transform is not None
+        assert fused is not None
+        missing = run.gpu.missing(splat=True)
+        if missing:
+            self._require(missing, "The Gaussian splat cannot be trained")
+            run.contributions["gaussian_splat"] = {"applied": False, "reason": missing}
+            ctx.warn("gaussian_splat_unavailable", missing, "info")
+            return
+        tf = dense.transform
+        data = np.load(dense.npz)
+        width_in, height_in = (float(a) for a in data["input_size"])
+        views = [int(k) for k in data["views"]]
+        cams = []
+        for v, kf in enumerate(views):
+            factor, left, top = (float(a) for a in data["crop"][v])
+            c2w = np.eye(4)
+            c2w[:3, :3] = tf.rotation @ data["c2w"][v][:3, :3]
+            c2w[:3, 3] = tf.points(data["c2w"][v][:3, 3][None])[0]
+            h, w = run.images[kf].shape[:2]
+            f = float(data["focal"][v]) / factor
+            cams.append(
+                {
+                    "image": f"{kf:04d}.jpg",
+                    "c2w": c2w.round(8).tolist(),
+                    "fx": f,
+                    "fy": f,
+                    "cx": (width_in / 2 + left) / factor,
+                    "cy": (height_in / 2 + top) / factor,
+                    "width": w,
+                    "height": h,
+                    "split": "test" if len(views) >= 8 and v % 8 == 4 else "train",
+                }
+            )
+        work = run.work("splat")
+        (work / "cameras.json").write_text(json.dumps({"cameras": cams}), encoding="utf-8")
+        np.savez(work / "init.npz", points=fused.points.astype(np.float32), colors=fused.colors)
+        p = run.profile
+        done = self._gpu_step(
+            ctx,
+            "gaussian_splat",
+            "Gaussian splat training",
+            "splat_runner.py",
+            [
+                "--frames",
+                str(run.work("frames")),
+                "--cameras",
+                str(work / "cameras.json"),
+                "--points",
+                str(work / "init.npz"),
+                "--out",
+                str(work),
+                *(["--masks", str(run.masks_dir)] if run.masks_dir is not None else []),
+                "--iterations",
+                str(p.splat_iterations),
+                "--max-gaussians",
+                str(p.splat_max_gaussians),
+                "--sh-degree",
+                str(p.splat_sh_degree),
+                "--budget-mib",
+                str(p.vram_budget_mib),
+            ],
+            {"train": ("Gaussian splat: optimising Gaussians and camera poses", "iterations")},
+            splat=True,
+        )
+        if done is None:
+            return
+        scene = (work / "scene.ply").read_bytes()
+        ctx.publish(
+            _declare(
+                run,
+                "gaussian-scene",
+                ArtifactKind.GAUSSIAN_SCENE,
+                "application/vnd.nazar.gaussians+ply",
+                scene,
+                xyz=fused.points,
+                frames=_frames(run, views),
+                final=True,
+                spatial=True,
+                stage="gaussian_splat",
+            ),
+            scene,
+        )
+        renders_dir = work / "renders"
+        if renders_dir.is_dir() and any(renders_dir.iterdir()):
+            renders = _zip(renders_dir)
+            ctx.publish(
+                _declare(
+                    run,
+                    "splat-renders",
+                    ArtifactKind.EXPORT,
+                    "application/zip",
+                    renders,
+                    final=True,
+                    stage="gaussian_splat",
+                ),
+                renders,
+            )
+        keys = (
+            "gaussians",
+            "iterations",
+            "sh_degree",
+            "train_views",
+            "test_views",
+            "train_psnr_db",
+            "test_psnr_db",
+            "pose_refinement_mean_shift",
+            "oom_retries",
+            "peak_vram_mib",
+        )
+        run.contributions["gaussian_splat"] = {
+            "applied": True,
+            "what": "A photoreal view-dependent scene: Gaussians started on the fused cloud and "
+            "optimised with the camera poses against the keyframes (moving objects masked out "
+            "of the loss). For viewing, not for measuring.",
+            **{k: done.get(k) for k in keys},
+            "test_protocol": "every 8th keyframe held out; scored after a pose-only alignment "
+            "with the Gaussians frozen (InstantSplat protocol)",
+        }
+        ctx.progress(
+            f"Gaussian splat: {done['gaussians']:,} Gaussians, held-out PSNR "
+            f"{done.get('test_psnr_db')} dB",
+            p.splat_iterations,
+            p.splat_iterations,
+            "iterations",
+        )
+
+
+class Surface(_Stage):
+    """Open3D screened Poisson on the fused cloud: a coloured mesh whose vertices carry the
+    confidence class of the data under them (inferred where the surface bridges a gap)."""
+
+    def _missing(self) -> str | None:
+        return self.run_state.gpu.missing()
+
+    def skip_reason(self, lease: WorkerLease) -> str | None:
+        if self.run_state.fused is None:
+            return self._skipped(
+                "surface_processing",
+                "Skipped: a sparse cloud cannot support a meaningful surface; it would be mostly "
+                "invented.",
+            )
+        return self._skipped("surface_processing", self._missing_or_skip(self._missing()))
+
+    def run(self, ctx: StageContext) -> None:
+        run = self.run_state
+        self._require(self._missing(), "The surface mesh cannot be built")
+        fused, final = run.fused, run.final
+        assert fused is not None and final is not None
+        t0 = time.monotonic()
+        work = run.work("surface")
+        np.savez(
+            work / "cloud.npz",
+            points=fused.points,
+            colors=fused.colors,
+            labels=final[2],
+            cameras=fused.cameras,
+            normals=fused.normals,
+        )
+        ctx.progress(
+            f"Open3D: normals and screened Poisson (depth {run.profile.poisson_depth}) on "
+            f"{len(fused.points):,} points",
+            None,
+            None,
+            None,
+        )
+        done = self._gpu_step(
+            ctx,
+            "surface_processing",
+            "Open3D surface reconstruction",
+            "surface_runner.py",
+            [
+                "--cloud",
+                str(work / "cloud.npz"),
+                "--out",
+                str(work / "mesh.npz"),
+                "--depth",
+                str(run.profile.poisson_depth),
+            ],
+            {},
+        )
+        if done is None:
+            return
+        mesh = np.load(work / "mesh.npz")
+        mpu = run.frame().metres_per_unit
+        k = mpu or 1.0
+        glb = write_mesh_glb(
+            mesh["vertices"] * k,
+            mesh["faces"],
+            mesh["colors"],
+            mesh["normals"],
+            extras={
+                "units": "metre" if mpu else "unitless",
+                "scale_status": run.frame().scale_status.value,
+                "frame": "local_reconstruction, +Y up",
+                "vertex_classes": done["vertex_classes"],
+                "note": "Screened Poisson surface from NAZAR's fused cloud; see the report.",
+            },
+        )
+        ctx.publish(
+            _declare(
+                run,
+                "surface-mesh",
+                ArtifactKind.MESH,
+                "model/gltf-binary",
+                glb,
+                xyz=mesh["vertices"].astype(np.float64),
+                frames=_frames(run, run.placed()),
+                final=True,
+                spatial=True,
+                stage="surface_processing",
+            ),
+            glb,
+        )
+        classes = done["vertex_classes"]
+        total = max(1, sum(classes.values()))
+        run.contributions["surface_processing"] = {
+            "applied": True,
+            "what": "A solid coloured triangle mesh. Normals come from Metric3D where available "
+            "and otherwise face the camera that saw each point; Poisson surface not supported "
+            "by any point is trimmed, and surface bridging gaps is labelled inferred.",
+            **{k2: v for k2, v in done.items() if k2 not in ("event", "timings")},
+            "inferred_vertex_share": round(classes["inferred"] / total, 4),
+            "units": "metre" if mpu else "unitless",
+        }
+        ctx.progress(
+            f"Mesh: {done['vertices']:,} vertices, {done['triangles']:,} triangles, "
+            f"{100 * classes['inferred'] / total:.1f}% inferred",
+            None,
+            None,
+            None,
+        )
+        run.timings["surface_processing_s"] = round(time.monotonic() - t0, 3)
 
 
 def _statistical_inliers(points: npt.NDArray[np.float64], k: int = 8, sigma: float = 2.5) -> Any:
@@ -540,6 +1246,16 @@ class Analysis(_Stage):
             )
             if not al.orientation_accepted:
                 ctx.warn("not_georeferenced", " ".join(al.reasons), "info")
+        elif run.estimated_mpu is not None:
+            scale = run.contributions.get("depth_priors", {}).get("scale", {})
+            ctx.warn(
+                "scale_estimated_depth",
+                f"Scale estimated from Metric3D-v2 depth (1 unit = {run.estimated_mpu:.3f} m; "
+                f"per-view spread {100 * float(scale.get('scale_spread_rel', 0)):.0f}%). It relies "
+                "on Fast3R's estimated focal length and is not georeferenced: treat distances as "
+                "rough estimates.",
+                "info",
+            )
         else:
             tail = (
                 "distances are relative (unitless). Absolute size, height and geographic "
@@ -551,6 +1267,8 @@ class Analysis(_Stage):
                 else f"Telemetry was supplied but not applied. {' '.join(al.reasons)} So {tail}"
             )
             ctx.warn("scale_unknown", message, "warning")
+        applied = [k for k, c in run.contributions.items() if c.get("applied")]
+        ctx.progress(f"Models that contributed: {', '.join(applied) or 'none'}", None, None, None)
         if run.method == FAST3R:
             ctx.warn(
                 "learned_geometry",
@@ -579,11 +1297,11 @@ class Exporting(_Stage):
                 "model_version": _provenance(FAST3R).model_version,
                 "licence": "FAIR Noncommercial Research License (academic use approved)",
                 "placed_keyframes": len(run.dense.views),
-                "points_before_filter": len(run.dense.points),
+                "points_before_filter": len(run.keep),
                 "points": int(run.keep.sum()),
                 "focal_px_estimated": round(run.dense.focal_px, 2),
                 "focal_note": "Estimated by Fast3R's global head; not calibrated.",
-                **{k: v for k, v in run.gpu.items() if k not in ("device",)},
+                **{k: v for k, v in run.gpu_stats.items() if k not in ("device",)},
             }
             rule = (
                 f"Pixels with Fast3R confidence below max({fast3r.KEEP_MIN_CONF}, the job's "
@@ -592,9 +1310,9 @@ class Exporting(_Stage):
                 "Heuristic labels from the model's own score, not calibrated probabilities."
             )
             resources = {
-                "device": run.gpu.get("device") or "GPU",
-                "peak_vram_mib": run.gpu.get("peak_vram_mib"),
-                "peak_host_commit_mib": run.gpu.get("peak_host_commit_mib"),
+                "device": run.gpu_stats.get("device") or "GPU",
+                "peak_vram_mib": run.gpu_stats.get("peak_vram_mib"),
+                "peak_host_commit_mib": run.gpu_stats.get("peak_host_commit_mib"),
                 "host": platform.platform(),
             }
             limitations = [
@@ -604,7 +1322,6 @@ class Exporting(_Stage):
                 "Up direction is estimated from the dominant plane and may be wrong for "
                 "scenes without a ground plane.",
             ]
-            surface = "Surface meshing is not implemented yet."
         else:
             snap = run.snapshot
             assert snap is not None
@@ -637,7 +1354,6 @@ class Exporting(_Stage):
                 "Up direction is estimated from the dominant plane and may be wrong for "
                 "scenes without a ground plane.",
             ]
-            surface = "A sparse cloud cannot support a meaningful surface."
         report: dict[str, Any] = {
             "schema": "nazar.processing-report/1",
             "generated_at": datetime.now(UTC).isoformat(),
@@ -668,16 +1384,30 @@ class Exporting(_Stage):
             },
             "timings_s": {**run.timings, "first_preview_s": run.first_preview_s},
             "resources": resources,
+            "profile": run.profile.report(),
+            "contributions": run.contributions,
             "skipped": {
-                "depth_priors": "Metric3D-v2 is not installed on this worker.",
-                "dynamic_analysis": "YOLO + SAM2 are not installed on this worker.",
-                "sensor_optimization": "No telemetry was supplied.",
-                "surface_processing": surface,
+                k: str(c.get("reason"))
+                for k, c in run.contributions.items()
+                if not c.get("applied")
             },
             "limitations": limitations,
         }
+        budget = run.profile.vram_budget_mib
+        resources["gpu_peak_vram_mib_by_stage"] = run.gpu_peaks
+        resources["gpu_budget_mib"] = budget or None
+        resources["within_gpu_budget"] = (
+            all(v <= budget for v in run.gpu_peaks.values()) if budget else None
+        )
+        mesh = run.contributions.get("surface_processing", {})
+        if mesh.get("applied"):
+            report["confidence"]["mesh_vertices"] = mesh["vertex_classes"]
+        if run.frame().scale_status is ScaleStatus.METRIC_ESTIMATED:
+            limitations[1] = (
+                "Scale is estimated from Metric3D-v2 depth with Fast3R's estimated focal length; "
+                "distances are rough estimates (see contributions.depth_priors.scale)."
+            )
         if run.telemetry is not None:
-            del report["skipped"]["sensor_optimization"]
             report["sensor_alignment"] = report["input"].pop("telemetry")
             report["input"]["telemetry"] = True
             if run.frame().scale_status is ScaleStatus.METRIC_SENSOR:
@@ -709,6 +1439,15 @@ class Exporting(_Stage):
             las_note = (
                 "LAS 1.2, point format 2 (RGB). Local frame in metres (GNSS scale), not "
                 "georeferenced. Axes converted to +Z up: LAS (X, Y, Z) = NAZAR (x, -z, y)."
+            )
+        elif run.estimated_mpu is not None:
+            las = write_las(
+                pts * run.estimated_mpu, cols, labels, system_id=b"NAZAR local m (estimated)"
+            )
+            las_note = (
+                "LAS 1.2, point format 2 (RGB). Local frame in metres, scale ESTIMATED from "
+                "Metric3D-v2 depth, not georeferenced. Axes converted to +Z up: LAS (X, Y, Z) = "
+                "NAZAR (x, -z, y)."
             )
         else:
             las = write_las(pts, cols, labels)
@@ -762,11 +1501,22 @@ class Exporting(_Stage):
             "glb": "glTF 2.0 binary: the final cloud as POINTS (COLOR_0 sRGB) and the camera path "
             "as a LINE_STRIP, +Y up. "
             + (
-                "Coordinates in metres (GNSS scale), local frame."
+                f"Coordinates in metres ({run.frame().scale_status.value} scale), local frame."
                 if mpu
                 else "Coordinates unitless (unknown scale), although glTF viewers assume metres."
             ),
         }
+        if mesh.get("applied"):
+            report["exports"]["mesh"] = (
+                "glTF 2.0 binary surface-mesh: indexed TRIANGLES with NORMAL and COLOR_0, same "
+                "frame and units as the GLB export; per-vertex classes counted in "
+                "confidence.mesh_vertices."
+            )
+        if run.contributions.get("gaussian_splat", {}).get("applied"):
+            report["exports"]["gaussian_scene"] = (
+                "3D Gaussian splat in the standard 3DGS PLY layout (x, y, z, f_dc, f_rest, "
+                "opacity, scale, rot), NAZAR frame and units; for viewing, not measuring."
+            )
         content = json.dumps(report, indent=2).encode()
         ctx.publish(
             _declare(run, "report", ArtifactKind.REPORT, "application/json", content, final=True),
@@ -787,34 +1537,28 @@ class Skip:
 
 def build_standard_pipeline(
     runtime: Fast3rRuntime | str | None = None,
+    *,
+    profile: ComputeProfile = LOCAL,
+    gpu: GpuRuntime | None = None,
+    work_dir: Path | None = None,
 ) -> dict[StageName, StageAdapter]:
     """`runtime`: the Fast3R runtime, or why it is unavailable; read from the environment
-    when omitted."""
-    run = _Run(runtime=Fast3rRuntime.from_env() if runtime is None else runtime)
+    when omitted. `profile`: local (6 GB budget) or clg. `work_dir`: keep model inputs and
+    outputs there (the local test script does; workers use a temporary directory)."""
+    run = _Run(
+        runtime=Fast3rRuntime.from_env() if runtime is None else runtime,
+        profile=profile,
+        gpu=GpuRuntime.from_env() if gpu is None else gpu,
+        work_dir=work_dir,
+    )
     return {
         StageName.PREPROCESSING: Preprocessing(run),
+        StageName.DYNAMIC_ANALYSIS: DynamicAnalysis(run),
         StageName.GEOMETRY: Geometry(run),
-        StageName.DEPTH_PRIORS: Skip("Metric3D-v2 is not installed on this worker."),
-        StageName.DYNAMIC_ANALYSIS: Skip("YOLO + SAM2 are not installed on this worker."),
+        StageName.DEPTH_PRIORS: DepthPriors(run),
         StageName.SENSOR_OPTIMIZATION: SensorOptimization(run),
         StageName.DENSE_RECONSTRUCTION: Densify(run),
-        StageName.SURFACE_PROCESSING: _SurfaceSkip(run),
+        StageName.SURFACE_PROCESSING: Surface(run),
         StageName.ANALYSIS: Analysis(run),
         StageName.EXPORTING: Exporting(run),
     }
-
-
-class _SurfaceSkip(Skip):
-    """Skipped either way; the reason depends on which geometry was produced."""
-
-    def __init__(self, run: _Run) -> None:
-        super().__init__("")
-        self.run_state = run
-
-    def skip_reason(self, lease: WorkerLease) -> str | None:
-        if self.run_state.dense is not None:
-            return "Surface meshing is not implemented yet; the dense cloud is the final output."
-        return (
-            "Skipped: a sparse cloud cannot support a meaningful surface; it would be mostly "
-            "invented."
-        )

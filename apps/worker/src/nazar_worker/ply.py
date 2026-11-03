@@ -1,7 +1,8 @@
 """Minimal binary PLY writer/reader for coloured point clouds (x, y, z float32; RGB uint8).
 
 Final clouds may carry one extra `uchar confidence` per point: 1 = observed, 2 = estimated,
-3 = inferred (the labels the job report counts). Generic PLY readers ignore the property."""
+3 = inferred (the labels the job report counts), and a `uchar source`: 0 = Fast3R pointmap,
+1 = filled from the Metric3D-v2 depth prior. Generic PLY readers ignore both properties."""
 
 import struct
 from collections.abc import Sequence
@@ -14,11 +15,14 @@ Point = tuple[float, float, float, int, int, int]
 _RECORD = struct.Struct("<fffBBB")
 _DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("r", "u1"), ("g", "u1"), ("b", "u1")])
 _DTYPE_CONF = np.dtype([*_DTYPE.descr, ("c", "u1")])
+_DTYPE_CONF_SRC = np.dtype([*_DTYPE_CONF.descr, ("s", "u1")])
 
 OBSERVED, ESTIMATED, INFERRED = 1, 2, 3
 
 
-def _header(count: int, comments: Sequence[str], confidence: bool = False) -> bytes:
+def _header(
+    count: int, comments: Sequence[str], confidence: bool = False, source: bool = False
+) -> bytes:
     header = ["ply", "format binary_little_endian 1.0"]
     header += [f"comment {c}" for c in comments]
     header += [
@@ -30,6 +34,7 @@ def _header(count: int, comments: Sequence[str], confidence: bool = False) -> by
         "property uchar green",
         "property uchar blue",
         *(["property uchar confidence"] if confidence else []),
+        *(["property uchar source"] if source else []),
         "end_header",
     ]
     return ("\n".join(header) + "\n").encode("ascii")
@@ -44,17 +49,24 @@ def write_ply_arrays(
     rgb: npt.NDArray[np.uint8],
     comments: Sequence[str] = (),
     confidence: npt.NDArray[np.uint8] | None = None,
+    source: npt.NDArray[np.uint8] | None = None,
 ) -> bytes:
     """Same format as `write_ply`, from (n, 3) arrays without per-point Python work, plus the
-    optional per-point confidence class."""
-    rec = np.empty(len(xyz), dtype=_DTYPE if confidence is None else _DTYPE_CONF)
+    optional per-point confidence class and (with it) the source of each point."""
+    if source is not None and confidence is None:
+        raise ValueError("A source property needs the confidence property.")
+    dtype = _DTYPE if confidence is None else _DTYPE_CONF if source is None else _DTYPE_CONF_SRC
+    rec = np.empty(len(xyz), dtype=dtype)
     for i, axis in enumerate("xyz"):
         rec[axis] = xyz[:, i]
     for i, channel in enumerate("rgb"):
         rec[channel] = rgb[:, i]
     if confidence is not None:
         rec["c"] = confidence
-    return _header(len(xyz), comments, confidence is not None) + rec.tobytes()
+    if source is not None:
+        rec["s"] = source
+    header = _header(len(xyz), comments, confidence is not None, source is not None)
+    return header + rec.tobytes()
 
 
 def _parse(data: bytes) -> npt.NDArray[np.void]:
@@ -63,7 +75,9 @@ def _parse(data: bytes) -> npt.NDArray[np.void]:
     if lines[:2] != ["ply", "format binary_little_endian 1.0"]:
         raise ValueError("not a binary little-endian PLY")
     count = next(int(line.split()[2]) for line in lines if line.startswith("element vertex"))
-    dtype = _DTYPE_CONF if "property uchar confidence" in lines else _DTYPE
+    dtype = _DTYPE
+    if "property uchar confidence" in lines:
+        dtype = _DTYPE_CONF_SRC if "property uchar source" in lines else _DTYPE_CONF
     body = data[end:]
     if len(body) != count * dtype.itemsize:
         raise ValueError("PLY body size does not match the vertex count")
@@ -89,3 +103,9 @@ def bounds(points: Sequence[Point]) -> tuple[list[float], list[float]]:
     lo = [min(p[i] for p in points) for i in range(3)]
     hi = [max(p[i] for p in points) for i in range(3)]
     return lo, hi
+
+
+def read_source(data: bytes) -> npt.NDArray[np.uint8] | None:
+    """The per-point source (0 Fast3R, 1 depth prior), or None when the cloud carries none."""
+    rec = _parse(data)
+    return np.asarray(rec["s"]) if "s" in (rec.dtype.names or ()) else None

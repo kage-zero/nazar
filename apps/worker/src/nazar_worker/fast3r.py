@@ -19,7 +19,7 @@ import queue
 import re
 import subprocess
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,7 +28,8 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 
-from nazar_worker.sfm import to_nazar_frame
+from nazar_worker.gpu import runner_env
+from nazar_worker.sfm import FrameTransform, nazar_frame_transform
 
 F64 = npt.NDArray[np.float64]
 U8 = npt.NDArray[np.uint8]
@@ -63,9 +64,20 @@ class Fast3rRuntime:
 
     @staticmethod
     def from_env(env: dict[str, str] | None = None) -> "Fast3rRuntime | str":
-        """The configured runtime, or the reason it is unavailable (shown to users)."""
+        """The configured runtime, or the reason it is unavailable (shown to users). Reading
+        the process environment (no `env` given), unset paths default to the main GPU
+        environment and weights installed by `scripts/setup_gpu.py`, when present."""
+        defaults = env is None
         env = dict(os.environ) if env is None else env
         python, weights = env.get("NAZAR_FAST3R_PYTHON", ""), env.get("NAZAR_FAST3R_WEIGHTS", "")
+        if defaults:
+            from nazar_worker.gpu import GpuRuntime
+
+            gpu = GpuRuntime.from_env(env)
+            if not python and "NAZAR_FAST3R_PYTHON" not in env and gpu.main_python is not None:
+                python = str(gpu.main_python)
+            if not weights and (gpu.weights / "Fast3R_ViT_Large_512").is_dir():
+                weights = str(gpu.weights / "Fast3R_ViT_Large_512")
         if not python or not weights:
             return "Fast3R is not configured on this worker (NAZAR_FAST3R_PYTHON/WEIGHTS)."
         if not Path(python).is_file():
@@ -95,6 +107,10 @@ class DenseCloud:
     """Median focal length, in pixels of the original keyframe width."""
     final: bool
     stats: dict[str, Any] = field(default_factory=dict)
+    transform: FrameTransform | None = None
+    """Fast3R frame -> NAZAR frame, reused by depth fusion and the splat cameras."""
+    npz: Path | None = None
+    keep_thr: float = KEEP_MIN_CONF
 
 
 def voxel_downsample(
@@ -127,9 +143,12 @@ def load_cloud(
     pts, conf, rgb = data["pts"], data["conf"], data["rgb"]
     keep_thr = max(KEEP_MIN_CONF, float(np.percentile(conf, KEEP_QUANTILE)))
     mask = conf >= keep_thr
+    if "dyn" in data.files:
+        mask &= ~data["dyn"]  # moving objects (SAM 2 masks) never enter the cloud
     xyz_cv = pts[mask].astype(np.float64)
     centers_cv = data["c2w"][:, :3, 3].astype(np.float64)
-    xyz, centers, plane = to_nazar_frame(xyz_cv, centers_cv)
+    tf, plane = nazar_frame_transform(xyz_cv, centers_cv)
+    xyz, centers = tf.points(xyz_cv), tf.points(centers_cv)
     down, cols, cf, voxel = voxel_downsample(xyz, rgb[mask], conf[mask], max_points)
     focal = float(np.median(data["focal"])) * original_width / float(data["input_size"][0])
     views = [int(v) for v in data["views"]]
@@ -141,6 +160,9 @@ def load_cloud(
         views=views,
         focal_px=focal,
         final=final,
+        transform=tf,
+        npz=path,
+        keep_thr=keep_thr,
         stats={
             "placed_keyframes": len(views),
             "total_keyframes": total_frames,
@@ -156,26 +178,6 @@ def load_cloud(
 _NOISE = re.compile(r"Warning|warnings\.warn|^\s{2,}\S")
 
 
-def runner_env(base: Mapping[str, str]) -> dict[str, str]:
-    """Environment for the GPU interpreter: the worker's own virtualenv must not leak into it
-    (its Scripts dir on PATH and VIRTUAL_ENV/PYTHON* variables can make the other interpreter
-    load the wrong DLLs or packages)."""
-    env = {k: v for k, v in base.items() if k.upper() not in _ISOLATE}
-    venv = base.get("VIRTUAL_ENV")
-    if venv:
-        own = os.path.normcase(os.path.normpath(venv))
-        env["PATH"] = os.pathsep.join(
-            p
-            for p in base.get("PATH", "").split(os.pathsep)
-            if p and not os.path.normcase(os.path.normpath(p)).startswith(own)
-        )
-    env.update(PYTHONWARNINGS="ignore", PYTHONIOENCODING="utf-8")
-    return env
-
-
-_ISOLATE = {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE"}
-
-
 def run_fast3r(
     runtime: Fast3rRuntime,
     images: list[U8],
@@ -184,12 +186,15 @@ def run_fast3r(
     on_event: Callable[[dict[str, Any]], None] = lambda e: None,
     *,
     max_views: int | None = None,
+    masks: Path | None = None,
+    budget_mib: int = 0,
     preview_points: int = 120_000,
     final_points: int = 300_000,
 ) -> Iterator[DenseCloud]:
     """Yield a preview cloud after each chunk and the final cloud last. Raises
     `Fast3rFailed` (with `oom` set on CUDA out-of-memory). `check_cancel` may raise; the
-    runner process is killed before the exception propagates."""
+    runner process is killed before the exception propagates. `masks` holds moving-object
+    masks (one PNG per keyframe, same stem); `budget_mib` caps the runner's GPU memory."""
     frames = workdir / "frames"
     frames.mkdir(parents=True, exist_ok=True)
     for i, img in enumerate(images):
@@ -200,6 +205,9 @@ def run_fast3r(
         "-X",
         "faulthandler",  # a native crash still prints a Python traceback to stderr
         str(runtime.runner),
+        "--budget-mib",
+        str(budget_mib),
+        *(["--masks", str(masks)] if masks is not None else []),
         "--frames",
         str(frames),
         "--weights",

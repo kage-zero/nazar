@@ -1286,9 +1286,9 @@
         "validating",
         "queued",
         "preprocessing",
+        "dynamic_analysis",
         "geometry",
         "depth_priors",
-        "dynamic_analysis",
         "sensor_optimization",
         "dense_reconstruction",
         "surface_processing",
@@ -1822,12 +1822,12 @@
       "type": "object"
     },
     "StageName": {
-      "description": "Processing stages. Each value is also the job status while that stage runs.",
+      "description": "Processing stages. Each value is also the job status while that stage runs.\n\nMoving objects are masked *before* geometry, so the masks keep them out of the pose\nestimate as well as out of the points.",
       "enum": [
         "preprocessing",
+        "dynamic_analysis",
         "geometry",
         "depth_priors",
-        "dynamic_analysis",
         "sensor_optimization",
         "dense_reconstruction",
         "surface_processing",

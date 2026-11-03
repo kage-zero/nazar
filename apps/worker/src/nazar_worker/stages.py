@@ -29,18 +29,18 @@ class StagePlan:
 
 STAGE_PLAN: tuple[StagePlan, ...] = (
     StagePlan(StageName.PREPROCESSING, "FFmpeg + OpenCV", 2, optional=False),
+    StagePlan(StageName.DYNAMIC_ANALYSIS, "YOLO11 + SAM 2 (masks before geometry)", 6, True),
     StagePlan(StageName.GEOMETRY, "Fast3R (GPU); CPU baseline: OpenCV SfM", 3, optional=False),
     StagePlan(StageName.DEPTH_PRIORS, "Metric3D-v2", 5, optional=True),
-    StagePlan(StageName.DYNAMIC_ANALYSIS, "YOLO + SAM2", 6, optional=True),
     StagePlan(
         StageName.SENSOR_OPTIMIZATION, "Sim(3) GNSS alignment (telemetry only)", 5, optional=True
     ),
     StagePlan(
-        StageName.DENSE_RECONSTRUCTION, "Open3D + InstantSplat; CPU: filtered sparse", 7, False
+        StageName.DENSE_RECONSTRUCTION, "Fusion + Gaussian splat (gsplat); CPU: sparse", 7, False
     ),
-    StagePlan(StageName.SURFACE_PROCESSING, "Poisson / SuGaR + GDAL/PyProj", 7, optional=True),
-    StagePlan(StageName.ANALYSIS, "Confidence + measurements", 8, optional=False),
-    StagePlan(StageName.EXPORTING, "PLY / GLB / LAS + report", 8, optional=False),
+    StagePlan(StageName.SURFACE_PROCESSING, "Open3D screened Poisson mesh", 7, optional=True),
+    StagePlan(StageName.ANALYSIS, "Confidence + per-model contributions", 8, optional=False),
+    StagePlan(StageName.EXPORTING, "PLY / LAS / GLB / mesh / splat + report", 8, optional=False),
 )
 
 

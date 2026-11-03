@@ -15,6 +15,7 @@ from nazar_contracts import (
     PIPELINE_STAGES,
     ArtifactCreate,
     ArtifactCreated,
+    ComputeTarget,
     EventType,
     GeometryBackend,
     PipelineMode,
@@ -24,6 +25,7 @@ from nazar_contracts import (
 )
 from nazar_worker.client import ApiCallFailed, LeaseLost, WorkerApi, WorkerClient
 from nazar_worker.fast3r import Fast3rRuntime
+from nazar_worker.profile import for_location
 from nazar_worker.stages import (
     Cancelled,
     StageAdapter,
@@ -37,8 +39,13 @@ from nazar_worker.test_pipeline import build_test_pipeline
 log = logging.getLogger("nazar_worker")
 
 
-def adapters_for(mode: PipelineMode, step_s: float) -> dict[StageName, StageAdapter]:
-    return build_test_pipeline(step_s) if mode is PipelineMode.TEST else build_standard_pipeline()
+def adapters_for(
+    mode: PipelineMode, step_s: float, location: ComputeTarget = ComputeTarget.LOCAL
+) -> dict[StageName, StageAdapter]:
+    """The worker's location picks the compute profile: the college worker runs `clg`."""
+    if mode is PipelineMode.TEST:
+        return build_test_pipeline(step_s)
+    return build_standard_pipeline(profile=for_location(location))
 
 
 class _Heartbeat(threading.Thread):
@@ -265,7 +272,8 @@ def run_loop(
             time.sleep(poll_s)
             continue
         log.info("leased job %s (attempt %s, %s)", lease.job_id, lease.attempt, lease.pipeline)
-        outcome = JobRun(client, lease, adapters_for(lease.pipeline, step_s), heartbeat_s).execute()
+        adapters = adapters_for(lease.pipeline, step_s, client.location)
+        outcome = JobRun(client, lease, adapters, heartbeat_s).execute()
         log.info("job %s %s", lease.job_id, outcome)
         handled += 1
         if once:

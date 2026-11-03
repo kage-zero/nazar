@@ -209,7 +209,8 @@ def run_bundle(bundle: Path, out: Path, worker_id: str, step_s: float = 0.0) -> 
     """Process a mission bundle with no network. Returns the outcome (completed / failed)."""
     with BundleClient(bundle, out) as client:
         lease = client.lease
-        run = JobRun(client, lease, adapters_for(lease.pipeline, step_s), heartbeat_s=3600)
+        adapters = adapters_for(lease.pipeline, step_s, client.location)
+        run = JobRun(client, lease, adapters, heartbeat_s=3600)
         outcome = run.execute()
         client.finish(outcome, worker_id)
     return outcome
