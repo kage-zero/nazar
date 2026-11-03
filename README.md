@@ -2,7 +2,7 @@
 
 Single-pass drone video → progressively revealed 3D reconstruction.
 
-> **Status: Milestone 2 (ingestion) in progress.** Operator account, missions, resumable video upload, server-side validation, preflight quality report and keyframe selection work end to end. **No reconstruction stage runs yet.** See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+> **Status: full model pipeline on `feature/full-pipeline`.** Video in → YOLO11 + SAM 2 masks → Fast3R poses and points → Metric3D-v2 depth and normals → fused cloud → Gaussian splat → Poisson mesh, each model's contribution reported. Runs within 6 GB on a laptop (`--how local`) or on the college GPU (`--how clg`); try `python scripts/test_full_pipeline.py --video <clip> --how local`. The web viewer shows points and cameras; mesh and splat are downloads for now. See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
 
 ## Layout
 

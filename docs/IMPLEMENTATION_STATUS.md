@@ -1,12 +1,22 @@
 # Implementation status
 
-_Last updated: 2026-10-28_
+_Last updated: 2026-11-04_
 
-## Current milestone: **Milestone 3 (GPU) — Fast3R dense geometry, with the CPU baseline as the visible fallback**
+## Current milestone: **Full model pipeline (branch `feature/full-pipeline`) — video in, explainable 3D model out**
+
+Every model from the brief is now wired in sequence: YOLO11 + SAM 2 (moving-object masks) → Fast3R (poses + dense points) → Metric3D-v2 (depth + normals) → fusion → gsplat Gaussian splat (with pose refinement) → Open3D Poisson mesh. Each model's contribution, peak VRAM and any skip reason is in `report.json` (`contributions`). Two profiles: `local` (6 GB laptop, hard 5.5 GiB budget, a model may be skipped only on out-of-memory) and `clg` (college GPU, strict, larger models). Test it with:
+
+```
+uv run --package nazar-worker python scripts/test_full_pipeline.py --video docs/sample/video/sample1.mp4 --how local
+```
+
+See "Full pipeline report" below and [`pipeline-completion/06-FULL-PIPELINE-PLAN.md`](pipeline-completion/06-FULL-PIPELINE-PLAN.md).
+
+### Earlier: Milestone 3 (GPU) — Fast3R dense geometry, with the CPU baseline as the visible fallback
 
 **Reconstruct** now runs **Fast3R** on the GPU when the worker has the Fast3R runtime set up (`pnpm gpu:setup`; this laptop's RTX 4050 is set up). Otherwise it runs the classical CPU structure-from-motion baseline. Either way the result is in a local frame with unknown scale, and the job, every artifact and the viewer say which method ran. If Fast3R fails on a job, the job still completes with the CPU baseline and a visible `fast3r_fallback` warning that gives the reason.
 
-The other GPU models from the brief (Metric3D-v2 scale, InstantSplat, YOLO + SAM2) are **not** integrated. The college GPU (Milestone 1) has not been accessed. The synthetic test pipeline still exists for plumbing checks and stays labelled as synthetic.
+_(Superseded by the full pipeline above.)_ The college GPU (Milestone 1) has not been accessed. The synthetic test pipeline still exists for plumbing checks and stays labelled as synthetic.
 
 **Optional telemetry** (DJI SRT / CSV) can now be attached to a mission. When the camera path matches the GPS track well enough, the result gets a metric scale from GNSS; otherwise it stays local and says why. See the telemetry report below.
 
@@ -32,6 +42,28 @@ Milestone 1 (college VDI hardware validation) still needs the user inside a Sync
 | Worker | `doctor`, `stages`, and **`run`**: lease → heartbeat thread → stages → events/artifacts, with cancel, lost-lease and failure handling. Stage adapters skip with a reason. `test` = synthetic plumbing pipeline. **`standard` = CPU SfM baseline** (see the Milestone 3 report). Unusable input fails the job with a plain, non-retryable reason (`StageFailed`). |
 | Jobs (Milestone 4) | Contracts: `job.queued`, job/stage snapshot, worker lease/heartbeat/event/artifact models. API: jobs, append-only event log with atomic `seq` and idempotency keys, state machine, lease sweeper, worker routes (bearer token + lease header), artifact declare/upload with size+SHA-256 checks, WebSocket stream with REST catch-up, cancel/retry. Web: live job panel, stage table, outputs with downloads, completion sound/vibration (once per watched job, user toggles), point-cloud and camera-path layers with in-place revision swaps, fit/toggles, frame/units labels, mission kept in the URL. Readiness `worker` check is now real (last contact within 60 s). |
 | Docs | Research (sample facts corrected; preflight results), architecture (ingestion flow), environment setup (env:init, operator account), README. |
+
+## Full pipeline report (2026-11-04, Windows 11 laptop, RTX 4050 Laptop 6 GB, `--how local`)
+
+`sample1.mp4` (Colosseum orbit, 22 keyframes), no telemetry. Job **completed in 16.2 min**, exit 0. Peak GPU memory **4769 MiB of the 5632 MiB budget** (device-sampled rise over other programs, CUDA context included). No model was skipped.
+
+| Stage | Model | What it contributed | Time | Peak VRAM |
+|---|---|---|---|---|
+| dynamic_analysis | YOLO11s + SAM 2.1 small | 0 moving objects found (people are a few pixels tall), so nothing masked | 6 s | 690 MiB |
+| geometry | Fast3R ViT-L/512 | 22/22 views posed, ~290k confident points | 26 s (114 s cold first load) | 4769 MiB |
+| depth_priors | Metric3D-v2 ViT-L | depth + normals for 22 views; 22/22 agree with Fast3R (median rel. error 7.2 %, scale spread 3.4 %) | 54 s | 4324 MiB |
+| sensor_optimization | GNSS Sim3 | skipped: no telemetry | — | — |
+| dense_reconstruction | fusion | 549,051 points after outliers, 167,425 filled from the depth prior | ~10 s | CPU |
+| dense_reconstruction | gsplat 1.5.3 | 276,531 Gaussians, 4000 it; PSNR train 25.84 / held-out 25.90 dB; mean pose shift 0.021 | ~14 min* | 1650 MiB |
+| surface_processing | Open3D screened Poisson | 642,369 vertices / 1,284,857 triangles; vertices 56k observed / 499k estimated / 87k inferred (13.6 %) | 22 s | CPU |
+
+\*The splat trained in 282 s on an idle machine; this run shared the CPU with the API test suite.
+
+Artifacts: dynamic masks, depth previews, point cloud (PLY/LAS/GLB), camera trajectory, Gaussian scene PLY + renders, surface mesh GLB, report.
+
+**Scale is not applied from Metric3D.** It implies 1 unit = 6.84 m, but that inherits Fast3R's estimated focal length; on sample1 the mesh comes out about 2.2× smaller than the Colosseum's known size. It is reported under `contributions.depth_priors.scale` with `applied_to_outputs: false`. Metric output still needs GNSS telemetry or a known length.
+
+Fixes found by running it: Metric3D needs an `mmcv.utils` shim (mmengine provides the pieces); runners must use absolute paths (they run with cwd `apps/worker/gpu`); on Windows the CUDA teardown hung a finished runner for ~25 min, so runners now leave via `os._exit` after their result event.
 
 ## Telemetry import and GNSS scale (2026-10-28, Windows 11 laptop, CPU only)
 
@@ -433,15 +465,19 @@ Milestone 3 research matrix: candidate geometry models with licence, weight term
 - **Login throttling is in memory.** It resets on restart and is per process.
 - **First-run setup trusts loopback.** Through the Vite dev proxy every request is loopback, so keep the dev server bound to 127.0.0.1 (the default) and use env bootstrap for anything exposed.
 - `pytest` shows a harmless `StarletteDeprecationWarning` (the test client wants `httpx2`; not yet vetted).
-- Real reconstruction is **Fast3R** (GPU, dense) or the **CPU SfM baseline** (sparse). Metric3D-v2, InstantSplat and YOLO + SAM2 are not implemented.
-- The college GPU has not been accessed.
+- Real reconstruction is the **full model pipeline** (GPU) or the **CPU SfM baseline** (sparse). The splat is a gsplat optimisation started from the fused cloud (InstantSplat-style), not the InstantSplat code.
+- **Moving-object masking is untested on real moving objects:** neither sample clip has any large enough to detect.
+- **The web viewer does not show the mesh or the splat yet** (they are downloadable artifacts; backend first).
+- **Metric3D scale is reported, not applied** (see the full pipeline report).
+- The college GPU has not been accessed. The `clg` profile's weights (Metric3D ViT-giant2 ~5.5 GB, SAM 2.1 large ~0.9 GB, YOLO11x ~0.1 GB) are not downloaded yet.
 
 ## Next action
 
 0. **Your checks:** [`PENDING_USER_TESTS.md`](PENDING_USER_TESTS.md).
 1. **Milestone 1** (needs the user): start a SyncVDI session, run `nazar-worker doctor` and read-only network checks there, record the results, and choose ADR-0003's online or bundle mode.
-2. **Milestone 3 (GPU), continued:** run Fast3R on the college GPU, where long clips should need fewer passes, and compare it with the laptop numbers in `docs/research/model-selection.md`.
-3. **Telemetry with real data** (B11) and the georeferenced LAS in a GIS (B13).
+2. **Full pipeline on the college GPU:** `python scripts/setup_gpu.py --profile clg`, then `scripts/test_full_pipeline.py --how clg` (see `todoCollege.md` step 7); compare with the laptop numbers above.
+3. **Viewer:** mesh layer and splat viewer in the web app.
+4. **Telemetry with real data** (B11) and the georeferenced LAS in a GIS (B13).
 
 ## Resume instructions
 
