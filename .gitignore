@@ -58,3 +58,6 @@ Thumbs.db
 
 # Playwright session state from E2E setup
 **/playwright/.auth/
+
+# --- Local code snapshots for moving the repo to the college VDI (todoCollege.md step 5) ---
+/nazar.zip
