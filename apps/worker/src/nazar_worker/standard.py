@@ -163,7 +163,7 @@ class _Run:
     def work(self, sub: str = "") -> Path:
         if self._work is None:
             if self.work_dir is not None:
-                self._work = self.work_dir
+                self._work = self.work_dir.resolve()  # runners run from their own folder
                 self._work.mkdir(parents=True, exist_ok=True)
             else:
                 self._work = Path(tempfile.mkdtemp(prefix="nazar-job-"))

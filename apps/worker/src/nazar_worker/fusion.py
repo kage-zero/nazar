@@ -150,7 +150,7 @@ def fuse(
         w2c = np.linalg.inv(data["c2w"][v])
         cam = data["pts"][v][k].astype(np.float64) @ w2c[:3, :3].T + w2c[:3, 3]
         lo, hi = np.percentile(cam[:, 2], 1), np.percentile(cam[:, 2], 99)
-        hole &= (d > lo) & (d < hi)
+        hole &= (d >= 0.95 * lo) & (d <= 1.05 * hi)
         if not hole.any():
             continue
         h_in, w_in = conf.shape[1:]

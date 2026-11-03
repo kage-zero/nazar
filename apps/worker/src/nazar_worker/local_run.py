@@ -362,4 +362,4 @@ def add_parser(sub: Any) -> None:
 
 def main(args: argparse.Namespace) -> int:
     out = args.out or Path("var") / "runs" / f"{args.video.stem}-{args.how}"
-    return run_local(args.video, PROFILES[args.how], out, args.telemetry)
+    return run_local(args.video.resolve(), PROFILES[args.how], out.resolve(), args.telemetry)

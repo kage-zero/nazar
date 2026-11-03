@@ -4,20 +4,30 @@ Runners run inside an isolated GPU environment, never in the worker's own. They 
 lines on stdout (one event per line) and log to stderr. This module gives every runner the
 same event format and the same VRAM discipline:
 
-- `budget(mib)` caps this process's PyTorch allocations (`set_per_process_memory_fraction`),
-  also bounded by what is actually free right now (the desktop shares the card);
-- `peak()` reports what the process really used: the allocator's peak reservation plus the
-  CUDA context, measured as the free-memory drop before any allocation.
+- `budget(mib)` caps this process's PyTorch allocations (`set_per_process_memory_fraction`)
+  so that allocator + CUDA context stay within `mib`, also bounded by what is actually free
+  (the desktop shares the card);
+- `peak()` reports what the process really used. The device's used memory is read with
+  `nvidia-smi` before CUDA starts (baseline: other programs) and sampled 10x per second while
+  the runner works; the process peak is the largest rise over the baseline. That covers the
+  CUDA context and cuDNN/cuBLAS workspaces that PyTorch's own counters do not see.
 """
 
 import contextlib
 import json
+import shutil
+import subprocess
 import sys
+import threading
 import time
 from typing import Any
 
 _context_mib = 0.0
 _budget_mib = 0.0
+_baseline_mib: float | None = None
+_device_peak_mib = 0.0
+_ASSUMED_CONTEXT_MIB = 400.0
+"""Used only when nvidia-smi is unavailable to measure the CUDA context."""
 
 
 def emit(**event: Any) -> None:
@@ -28,22 +38,49 @@ def log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _nvidia_smi_used_mib() -> float | None:
+    exe = shutil.which("nvidia-smi")
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run(  # noqa: S603 - fixed argv
+            [exe, "--query-gpu=memory.used", "--format=csv,noheader,nounits", "-i", "0"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        return float(out.stdout.strip().splitlines()[0])
+    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        return None
+
+
+def _sample(torch: Any) -> None:
+    global _device_peak_mib
+    while True:
+        with contextlib.suppress(Exception):
+            free, total = torch.cuda.mem_get_info()
+            _device_peak_mib = max(_device_peak_mib, (total - free) / 2**20)
+        time.sleep(0.1)
+
+
 def budget(limit_mib: int) -> float:
-    """Initialise CUDA and cap this process. Returns the effective cap in MiB (0 = none)."""
-    global _context_mib, _budget_mib
+    """Initialise CUDA, start the memory sampler and cap this process. Returns the allocator
+    cap in MiB (0 = none)."""
+    global _context_mib, _budget_mib, _baseline_mib, _device_peak_mib
+    _baseline_mib = _nvidia_smi_used_mib()
     import torch
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available to PyTorch.")
-    free0, total = torch.cuda.mem_get_info()
     torch.zeros(1, device="cuda")  # creates the context
-    free1, _ = torch.cuda.mem_get_info()
-    _context_mib = max(0.0, (free0 - free1) / 2**20)
-    free_mib = free1 / 2**20
+    free, total = torch.cuda.mem_get_info()
+    used = (total - free) / 2**20
+    _device_peak_mib = used
+    _context_mib = used - _baseline_mib if _baseline_mib is not None else _ASSUMED_CONTEXT_MIB
+    _context_mib = max(_context_mib, 0.0)
+    threading.Thread(target=_sample, args=(torch,), daemon=True).start()
+    free_mib = free / 2**20
     if limit_mib <= 0:
         _budget_mib = 0.0
         return 0.0
-    # The cap covers the allocator only; the context already counts against the budget.
     cap = min(limit_mib - _context_mib, free_mib - 256)
     if cap <= 256:
         raise MemoryError(
@@ -59,19 +96,26 @@ def allocator_cap_mib() -> float:
     import torch
 
     if _budget_mib <= 0:
-        return torch.cuda.mem_get_info()[0] / 2**20
+        return float(torch.cuda.mem_get_info()[0] / 2**20)
     return max(0.0, _budget_mib - torch.cuda.memory_reserved() / 2**20)
 
 
-def peak() -> dict[str, int]:
+def peak() -> dict[str, Any]:
     import torch
 
     reserved = torch.cuda.max_memory_reserved() / 2**20
+    measured = _device_peak_mib - _baseline_mib if _baseline_mib is not None else None
+    process = max(reserved + _context_mib, measured or 0.0)
     return {
-        "peak_vram_mib": round(reserved + _context_mib),
+        "peak_vram_mib": round(process),
         "peak_allocated_mib": round(torch.cuda.max_memory_allocated() / 2**20),
+        "peak_reserved_mib": round(reserved),
         "cuda_context_mib": round(_context_mib),
+        "other_programs_mib": round(_baseline_mib) if _baseline_mib is not None else None,
         "budget_mib": round(_budget_mib + _context_mib) if _budget_mib else 0,
+        "measurement": "device-sampled rise over other programs (nvidia-smi baseline)"
+        if measured is not None
+        else "allocator peak + assumed CUDA context (nvidia-smi unavailable)",
     }
 
 

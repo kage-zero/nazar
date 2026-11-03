@@ -35,14 +35,38 @@ MEAN = np.array([123.675, 116.28, 103.53], np.float32)
 STD = np.array([58.395, 57.12, 57.375], np.float32)
 
 
+def _mmcv_shim() -> None:
+    """Metric3D's `mono` package imports a few helpers from the old `mmcv.utils` (mmcv 1.x,
+    which needs a CUDA build). Inference uses only their mmengine equivalents, so a small
+    stand-in module provides them instead of installing mmcv."""
+    import types
+
+    if "mmcv" in sys.modules:
+        return
+    try:
+        import mmcv  # noqa: F401  # type: ignore[import-not-found]
+
+        return
+    except ImportError:
+        pass
+    from mmengine import Config, DictAction
+    from mmengine.utils import get_git_hash
+    from mmengine.utils.dl_utils import collect_env
+
+    utils = types.ModuleType("mmcv.utils")
+    utils.Config, utils.DictAction = Config, DictAction  # type: ignore[attr-defined]
+    utils.collect_env, utils.get_git_hash = collect_env, get_git_hash  # type: ignore[attr-defined]
+    root = types.ModuleType("mmcv")
+    root.utils = utils  # type: ignore[attr-defined]
+    sys.modules["mmcv"], sys.modules["mmcv.utils"] = root, utils
+
+
 def load(src: Path, weights: Path, name: str) -> Any:
     import torch
 
     sys.path.insert(0, str(src))
-    try:
-        from mmcv.utils import Config  # type: ignore[import-not-found]
-    except ImportError:
-        from mmengine import Config
+    _mmcv_shim()
+    from mmengine import Config
     from mono.model.monodepth_model import get_configured_monodepth_model
 
     cfg_name, ckpt = CONFIGS[name]

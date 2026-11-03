@@ -64,46 +64,52 @@ Headless/production alternative: set `NAZAR_BOOTSTRAP_ADMIN_EMAIL` and `NAZAR_BO
 | `NAZAR_API_BASE_URL` | Where the worker finds the API. |
 | `NAZAR_PIPELINE_MODE` | `test` = deterministic fixture pipeline; `real` = research models. |
 
-## Fast3R GPU runtime (optional; standard pipeline geometry)
+## GPU models (optional; the full standard pipeline)
 
-Without it, Reconstruct uses the CPU baseline (classical structure-from-motion) and says so in the job. With it, the worker runs Fast3R ViT-L/512 for dense learned geometry, and still falls back to the CPU baseline, visibly, if Fast3R fails on a job.
+Without them, Reconstruct uses the CPU baseline (classical structure-from-motion) and says so in the job. With them, the standard pipeline runs every model in sequence, each contributing to the final 3D model (see `docs/pipeline-completion/06-FULL-PIPELINE-PLAN.md`):
 
-Licence: Fast3R code and weights are under the FAIR Noncommercial Research License. They are approved for this academic, non-commercial project only. That approval does not extend to commercial use or to other models.
+| Stage | Model | Contributes |
+|---|---|---|
+| dynamic_analysis | YOLO11 (Ultralytics, AGPL-3.0) + SAM 2.1 (Apache-2.0) | masks of objects that moved, kept out of poses, cloud, mesh and splat |
+| geometry | Fast3R ViT-L/512 (FAIR Noncommercial) | camera poses + dense pointmaps |
+| depth_priors | Metric3D-v2 (BSD-2-Clause) | metric depth + normals: scale evidence, mesh normals, hole fill |
+| dense_reconstruction | fusion + gsplat (Apache-2.0) | fused cloud; photoreal Gaussian splat (InstantSplat-style, poses refined) |
+| surface_processing | Open3D screened Poisson (MIT) | coloured triangle mesh with per-vertex confidence |
 
-Fast3R runs in its **own** Python 3.11 environment under `var/gpu/` (git-ignored). The worker never imports torch: it starts `apps/worker/gpu/fast3r_runner.py` with that interpreter and reads JSON events from it.
+Licences: Fast3R is approved for this academic, non-commercial project only; Ultralytics' AGPL-3.0 was accepted for the same project. Neither approval extends to commercial use.
+
+The worker never imports torch. Each model runs as a subprocess of one of two pinned environments under `var/gpu/` (git-ignored; ADR-0004):
+
+| Environment | Python / torch | Holds | Pins |
+|---|---|---|---|
+| `var/gpu/main-env` | 3.11 / 2.6.0+cu124 | Fast3R, Open3D, YOLO, SAM 2, Metric3D-v2 | `apps/worker/gpu/requirements-main.txt` |
+| `var/gpu/splat-env` | 3.10 / 2.4.1+cu124 | gsplat 1.5.3 (prebuilt CUDA wheel exists only for this combination) | `apps/worker/gpu/requirements-splat.txt` |
+
+Model sources are pinned to commits (`fast3r-src`, `sam2-src`, `metric3d-src`), weights to revisions and SHA-256 where published. `scripts/setup_gpu.py` installs and checks everything; it lists what is missing with approximate sizes and asks before downloading:
 
 ```bash
-pnpm gpu:check   # read-only: verifies source commit, packages, CUDA and weights
-pnpm gpu:setup   # installs whatever is missing (~2.6 GB checkpoint + ~3 GB of wheels)
+pnpm gpu:check                                     # read-only: sources, envs (CUDA), weights
+pnpm gpu:setup                                     # local profile (~7.5 GB first time)
+uv run python scripts/setup_gpu.py --profile clg   # college GPU weights (adds ~6.5 GB)
 ```
 
-`gpu:setup` installs three things, all pinned:
+No `.env` change is needed: the worker finds `var/gpu` by itself. `NAZAR_GPU_PYTHON`, `NAZAR_SPLAT_PYTHON`, `NAZAR_GPU_WEIGHTS` (and the older `NAZAR_FAST3R_*`) override the locations; setting one to an empty value disables it.
 
-| Piece | Pin |
-|---|---|
-| Source | `facebookresearch/fast3r` @ `33104d4b5b8df43795ecded236194958bbdac572` → `var/gpu/fast3r-src` |
-| Packages | `apps/worker/gpu/requirements-fast3r.txt` (exact freeze of the verified environment: torch 2.7.1+cu126, numpy 1.26.4, ...) → `var/gpu/fast3r-env` |
-| Weights | `jedyang97/Fast3R_ViT_Large_512` @ `a2c770b768ceb3a53c36c4f7a3619db0413dc3a1`, `model.safetensors` SHA-256 `1357d42e…0427` → `var/gpu/weights/Fast3R_ViT_Large_512` |
+### Two compute profiles
 
-It needs no Hugging Face token.
+| | `local` (laptop, 6 GB) | `clg` (college VDI, 30+ GB) |
+|---|---|---|
+| GPU memory | each model process capped at 5,632 MiB (allocator + CUDA context); peak measured and reported | no cap |
+| Models | YOLO11s, SAM 2.1 small, Metric3D ViT-Large (ViT-Small if Large does not fit), Fast3R in passes sized to the budget, splat 4k iterations / 400k Gaussians, SH degree 1 | YOLO11x, SAM 2.1 large, Metric3D ViT-giant2, Fast3R up to 48 views per pass, splat 15k iterations / 2M Gaussians, SH degree 3 |
+| If a model does not fit | skipped with a visible reason (only here) | the job fails: every model must run |
 
-Then set, in `.env` (paths, not secrets; relative paths are relative to the repo root):
+The worker's `--location` picks the profile (`local` or `college`). To run the whole pipeline on one video without the API or web app:
 
-| Setting | Meaning |
-|---|---|
-| `NAZAR_FAST3R_PYTHON` | GPU interpreter, e.g. `var/gpu/fast3r-env/Scripts/python.exe` (Windows) or `var/gpu/fast3r-env/bin/python` (Linux). |
-| `NAZAR_FAST3R_WEIGHTS` | Checkpoint directory containing `model.safetensors` and `config.json`. |
-| `NAZAR_FAST3R_MAX_VIEWS` | Views per forward pass. `0` (default) sizes passes from free VRAM: about 215 MiB per view plus 1.5 GiB margin. Out-of-memory halves it automatically. |
+```bash
+uv run --package nazar-worker python scripts/test_full_pipeline.py --video docs/sample/video/sample1.mp4 --how local
+```
 
-`pnpm worker` logs `standard geometry: Fast3R on the GPU …` or `CPU baseline. <reason>` at start.
-
-Measured on the RTX 4050 Laptop (6 GB) with the 22 keyframes of `docs/sample/video/sample1.mp4`:
-
-- Loading the model takes about 2 s.
-- Inference takes 4–5 s, in 3–4 aligned chunks of 9–10 views.
-- Peak VRAM is about 3.1 GiB.
-- The whole geometry stage takes about 14 s, most of it Python and torch start-up. The CPU baseline's geometry stage takes about 18 s.
-- The first preview reaches the viewer after about 10 s.
+It prints every stage as it runs, then a summary: what each model contributed, peak GPU memory per model against the budget, and the artifacts (point cloud, LAS, GLB, mesh GLB, splat PLY, masks, depth previews, report) under `var/runs/<video>-<how>/`.
 
 **Windows memory note.** On Windows (WDDM), GPU allocations are also charged to the system *commit* limit (RAM + page file), so the runner needs about 2.3 GiB plus its peak VRAM of free commit (≈ 5–8 GiB). When commit runs out, CUDA fails with `unknown error` or `Memory allocation failure` and the job falls back to the CPU baseline with that reason. If that happens, close memory-heavy apps or let Windows grow the page file. Linux hosts (the college VDI) do not charge commit this way.
 

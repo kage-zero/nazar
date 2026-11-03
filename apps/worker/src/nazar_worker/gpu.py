@@ -101,12 +101,10 @@ def runner_env(base: Mapping[str, str]) -> dict[str, str]:
             for p in base.get("PATH", "").split(os.pathsep)
             if p and not os.path.normcase(os.path.normpath(p)).startswith(own)
         )
-    env.update(
-        PYTHONWARNINGS="ignore",
-        PYTHONIOENCODING="utf-8",
+    env.update(PYTHONWARNINGS="ignore", PYTHONIOENCODING="utf-8")
+    if sys.platform != "win32":  # not supported by PyTorch on Windows
         # Fewer, larger segments: less fragmentation under a tight memory cap.
-        PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True",
-    )
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     return env
 
 

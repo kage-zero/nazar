@@ -13,13 +13,8 @@ echo Starting the API and web app...
 start "NAZAR API + web" cmd /k pnpm dev
 call :wait_api || exit /b 1
 
-rem Use the Fast3R runtime from "pnpm gpu:setup" when .env does not name one.
-findstr /r /b /c:"NAZAR_FAST3R_PYTHON=." .env >nul 2>nul
-if errorlevel 1 if exist "var\gpu\fast3r-env\Scripts\python.exe" if exist "var\gpu\weights\Fast3R_ViT_Large_512" (
-  set "NAZAR_FAST3R_PYTHON=%CD%\var\gpu\fast3r-env\Scripts\python.exe"
-  set "NAZAR_FAST3R_WEIGHTS=%CD%\var\gpu\weights\Fast3R_ViT_Large_512"
-  echo Using the Fast3R runtime in var\gpu.
-)
+rem The worker finds the GPU models installed by "pnpm gpu:setup" in var\gpu by itself.
+if exist "var\gpu\main-env" (echo Using the GPU models in var\gpu.) else (echo No GPU models installed: the CPU baseline will run. See "pnpm gpu:setup".)
 
 echo Starting the local GPU worker...
 start "NAZAR worker (local GPU)" cmd /k uv run --package nazar-worker nazar-worker run --modes test,standard --step-delay 0.8 --location local

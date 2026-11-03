@@ -45,3 +45,4 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
+markers = ["gpu: uses the installed GPU model environments (var/gpu); slow"]

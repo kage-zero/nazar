@@ -412,7 +412,7 @@ def test_readiness_reports_the_worker_geometry_backend(
     assert gpu()["status"] == "not_configured"
     assert "No worker" in gpu()["detail"]
     worker = worker_client(app_client)
-    monkeypatch.delenv("NAZAR_FAST3R_PYTHON", raising=False)
+    monkeypatch.setenv("NAZAR_FAST3R_PYTHON", "")
     assert (
         worker.lease("w1", [PipelineMode.STANDARD], geometry_backend([PipelineMode.STANDARD]))
         is None
