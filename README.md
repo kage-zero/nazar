@@ -47,6 +47,7 @@ uv run --package nazar-worker nazar-worker doctor   # read-only GPU/disk/toolcha
 ## Documentation
 
 - Source documents (unchanged): [project brief](docs/Single_Pass_Drone_3D_Reconstruction_Detailed_Project_Documentation.md), [design guide](docs/DESIGN.md), [SyncVDI guide](docs/SyncAI-VDI%20User%20Guide.pdf), [build prompt](docs/Claude_Prompt_Single_Pass_Drone_3D_Reconstruction.md), sample videos in `docs/sample/video/`
+- [Full Pipeline Completion Roadmap](docs/pipeline-completion/README.md) — step-by-step guides for surface meshing (Open3D), depth priors (Metric3D-v2), dynamic masks (YOLO+SAM2) and Gaussian splatting
 - [Implementation status](docs/IMPLEMENTATION_STATUS.md) · [Environment setup](docs/ENVIRONMENT_SETUP.md)
 - [Architecture](docs/architecture/overview.md) · [Testing](docs/testing/README.md) · [Research](docs/research/README.md)
 - Decisions: [ADR-0001 tooling](docs/decisions/ADR-0001-monorepo-tooling.md) · [ADR-0002 local-first infra](docs/decisions/ADR-0002-local-first-infrastructure.md) · [ADR-0003 pull-based GPU worker](docs/decisions/ADR-0003-pull-based-gpu-worker.md) · [ADR-0004 isolated model envs](docs/decisions/ADR-0004-isolated-model-environments.md) · [ADR-0005 design system & fonts](docs/decisions/ADR-0005-design-system-fonts.md)
