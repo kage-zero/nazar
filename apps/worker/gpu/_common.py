@@ -15,6 +15,7 @@ same event format and the same VRAM discipline:
 
 import contextlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,7 @@ _context_mib = 0.0
 _budget_mib = 0.0
 _baseline_mib: float | None = None
 _device_peak_mib = 0.0
+_stop = threading.Event()
 _ASSUMED_CONTEXT_MIB = 400.0
 """Used only when nvidia-smi is unavailable to measure the CUDA context."""
 
@@ -45,7 +47,10 @@ def _nvidia_smi_used_mib() -> float | None:
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv
             [exe, "--query-gpu=memory.used", "--format=csv,noheader,nounits", "-i", "0"],
-            capture_output=True, text=True, timeout=20, check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
         )
         return float(out.stdout.strip().splitlines()[0])
     except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
@@ -54,11 +59,10 @@ def _nvidia_smi_used_mib() -> float | None:
 
 def _sample(torch: Any) -> None:
     global _device_peak_mib
-    while True:
+    while not _stop.wait(0.1):
         with contextlib.suppress(Exception):
             free, total = torch.cuda.mem_get_info()
             _device_peak_mib = max(_device_peak_mib, (total - free) / 2**20)
-        time.sleep(0.1)
 
 
 def budget(limit_mib: int) -> float:
@@ -133,10 +137,19 @@ class Timer:
         return round(time.monotonic() - self.t0, 3)
 
 
+def _exit(code: int) -> None:
+    """Leave without the interpreter's CUDA teardown, which was seen to hang for minutes on
+    Windows after a runner had already written its results (the driver frees everything)."""
+    _stop.set()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
+
+
 def run_main(main: Any) -> None:
     """Exit codes: 0 done, 3 out of memory within the budget, 1 any other failure."""
     try:
-        sys.exit(main())
+        code = int(main() or 0)
     except Exception as exc:
         oom = isinstance(exc, MemoryError)
         with contextlib.suppress(Exception):  # torch itself may be what failed to import
@@ -146,4 +159,8 @@ def run_main(main: Any) -> None:
             kind="oom" if oom else "failed",
             message=f"{type(exc).__name__}: {exc}"[:500],
         )
-        sys.exit(3 if oom else 1)
+        import traceback
+
+        traceback.print_exc()
+        code = 3 if oom else 1
+    _exit(code)

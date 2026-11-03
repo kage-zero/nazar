@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from _common import allocator_cap_mib, budget, peak
+from _common import allocator_cap_mib, budget, peak, run_main
 
 PER_VIEW_MIB = 215
 MARGIN_MIB = 1536
@@ -466,8 +466,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception as exc:
-        emit(event="error", kind="failed", message=f"{type(exc).__name__}: {exc}"[:500])
-        raise
+    run_main(main)

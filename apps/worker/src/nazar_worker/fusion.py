@@ -182,7 +182,7 @@ def fuse(
     source = np.concatenate(src_l)
     stats.update(
         depth_prior_filled=filled,
-        points_with_prior_normal=int(has_n.sum()),
+        samples_with_prior_normal=int(has_n.sum()),
     )
     if priors is not None:
         per_view = scales["views"]

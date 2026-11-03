@@ -866,6 +866,9 @@ class Densify(_Stage):
                 "outliers_removed": int((~keep).sum()),
                 "final_points": int(keep.sum()),
                 "from_depth_prior": int((source != SOURCE_FAST3R).sum()),
+                "points_with_prior_normal": int(
+                    (np.linalg.norm(run.fused.normals, axis=1) > 0.5).sum()
+                ),
             }
         else:
             assert run.snapshot is not None

@@ -266,6 +266,7 @@ def main() -> int:
                     total=args.iterations,
                     gaussians=len(scene.params["means"]),
                     loss=round(float(loss), 5),
+                    elapsed_s=timer.s(),
                 )
         except Exception as exc:
             if not is_oom(exc) or oom_retries >= 3:
