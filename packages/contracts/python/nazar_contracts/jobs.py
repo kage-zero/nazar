@@ -13,9 +13,9 @@ class JobStatus(StrEnum):
     VALIDATING = "validating"
     QUEUED = "queued"
     PREPROCESSING = "preprocessing"
+    DYNAMIC_ANALYSIS = "dynamic_analysis"
     GEOMETRY = "geometry"
     DEPTH_PRIORS = "depth_priors"
-    DYNAMIC_ANALYSIS = "dynamic_analysis"
     SENSOR_OPTIMIZATION = "sensor_optimization"
     DENSE_RECONSTRUCTION = "dense_reconstruction"
     SURFACE_PROCESSING = "surface_processing"
@@ -36,12 +36,15 @@ class ComputeTarget(StrEnum):
 
 
 class StageName(StrEnum):
-    """Processing stages. Each value is also the job status while that stage runs."""
+    """Processing stages. Each value is also the job status while that stage runs.
+
+    Moving objects are masked *before* geometry, so the masks keep them out of the pose
+    estimate as well as out of the points."""
 
     PREPROCESSING = "preprocessing"
+    DYNAMIC_ANALYSIS = "dynamic_analysis"
     GEOMETRY = "geometry"
     DEPTH_PRIORS = "depth_priors"
-    DYNAMIC_ANALYSIS = "dynamic_analysis"
     SENSOR_OPTIMIZATION = "sensor_optimization"
     DENSE_RECONSTRUCTION = "dense_reconstruction"
     SURFACE_PROCESSING = "surface_processing"

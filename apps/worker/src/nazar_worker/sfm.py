@@ -481,26 +481,52 @@ def _up_alignment(points: F64, centers: F64, seed: int = 0) -> tuple[F64, F64, f
     return rot, np.array([0.0, best_d, 0.0]), share
 
 
+@dataclass(frozen=True)
+class FrameTransform:
+    """The similarity `to_nazar_frame` applied: p_nazar = scale * rotation @ p_cv + offset.
+    Kept so later stages (depth priors, splat cameras) can map more data into the same frame."""
+
+    scale: float
+    rotation: F64
+    """Proper rotation from the OpenCV frame to NAZAR axes (axis flip + levelling)."""
+    offset: F64
+
+    def points(self, p_cv: F64) -> F64:
+        return np.asarray(self.scale * p_cv @ self.rotation.T + self.offset)
+
+    def directions(self, d_cv: F64) -> F64:
+        """Directions (normals, camera axes) rotate but do not scale or shift."""
+        return np.asarray(d_cv @ self.rotation.T)
+
+
+def nazar_frame_transform(
+    pts_cv: F64, centers_cv: F64, max_plane_samples: int = 20_000
+) -> tuple[FrameTransform, float]:
+    """The transform into NAZAR's local frame: +Y up (dominant plane levelled, cameras above
+    it), centred on the median point, scaled so the median camera distance is 10 units.
+    Returns (transform, plane inlier share)."""
+    pts = pts_cv @ CV_TO_NAZAR.T
+    centers = centers_cv @ CV_TO_NAZAR.T
+    mid, k = np.zeros(3), 1.0
+    if len(pts):
+        mid = np.median(pts, axis=0)
+        k = 10 / (float(np.median(np.linalg.norm(centers - mid, axis=1))) or 1.0)
+    sample = (pts - mid) * k
+    if len(sample) > max_plane_samples:
+        pick = np.random.default_rng(0).choice(len(sample), max_plane_samples, replace=False)
+        sample = sample[pick]
+    rot, shift, plane_share = _up_alignment(sample, (centers - mid) * k)
+    return FrameTransform(k, rot @ CV_TO_NAZAR, shift - k * rot @ mid), plane_share
+
+
 def to_nazar_frame(
     pts_cv: F64, centers_cv: F64, max_plane_samples: int = 20_000
 ) -> tuple[F64, F64, float]:
-    """OpenCV-camera-frame points and camera centres → NAZAR's local frame: +Y up (dominant
-    plane levelled, cameras above it), centred on the median point, scaled so the median camera
-    distance is 10 units. Returns (points, centres, plane inlier share). Shared by every
+    """OpenCV-camera-frame points and camera centres → NAZAR's local frame (see
+    `nazar_frame_transform`). Returns (points, centres, plane inlier share). Shared by every
     geometry method so their outputs are directly comparable."""
-    pts = pts_cv @ CV_TO_NAZAR.T
-    centers = centers_cv @ CV_TO_NAZAR.T
-    if len(pts):
-        mid = np.median(pts, axis=0)
-        pts, centers = pts - mid, centers - mid
-        dist = float(np.median(np.linalg.norm(centers, axis=1))) or 1.0
-        pts, centers = pts * (10 / dist), centers * (10 / dist)
-    sample = pts
-    if len(pts) > max_plane_samples:
-        pick = np.random.default_rng(0).choice(len(pts), max_plane_samples, replace=False)
-        sample = pts[pick]
-    rot, shift, plane_share = _up_alignment(sample, centers)
-    return pts @ rot.T + shift, centers @ rot.T + shift, plane_share
+    tf, plane_share = nazar_frame_transform(pts_cv, centers_cv, max_plane_samples)
+    return tf.points(pts_cv), tf.points(centers_cv), plane_share
 
 
 def reconstruct(

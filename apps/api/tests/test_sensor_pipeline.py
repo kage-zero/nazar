@@ -68,7 +68,7 @@ def test_matching_telemetry_gives_metric_scale(
     app_client: TestClient,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("NAZAR_FAST3R_PYTHON", raising=False)
+    monkeypatch.setenv("NAZAR_FAST3R_PYTHON", "")
     mission = sample_mission(app_client)
     first, report = run_job(app_client, mission)
     assert "sensor_optimization" in report["skipped"]
@@ -122,7 +122,7 @@ def test_hover_telemetry_is_reported_but_not_applied(
     app_client: TestClient,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("NAZAR_FAST3R_PYTHON", raising=False)
+    monkeypatch.setenv("NAZAR_FAST3R_PYTHON", "")
     mission = sample_mission(app_client)
     t = np.arange(0, 60, 0.5)
     attach(app_client, mission, t, np.tile([0.0, 0.0, 30.0], (len(t), 1)))

@@ -135,7 +135,7 @@ def test_standard_job_through_the_cli_bundle_run(
     """REAL DATA: sample1 keyframes, offline `nazar-worker bundle run` (CPU baseline unless
     Fast3R is configured), then import. This is the command sequence for the college VDI."""
     for name in ("NAZAR_FAST3R_PYTHON", "NAZAR_FAST3R_WEIGHTS"):
-        monkeypatch.delenv(name, raising=False)  # deterministic: CPU baseline
+        monkeypatch.setenv(name, "")  # deterministic: CPU baseline
     job = start_job(app_client, sample_mission(app_client), pipeline="standard")
     bundle, result = tmp_path / "mission.zip", tmp_path / "result.zip"
     lease = export_bundle(worker_client(app_client), "laptop", bundle, [PipelineMode.STANDARD])

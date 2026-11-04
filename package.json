@@ -18,8 +18,8 @@
     "check": "turbo run lint typecheck test contracts:check",
     "worker": "uv run --package nazar-worker nazar-worker run --modes test,standard --step-delay 0.8",
     "env:init": "uv run python scripts/init_env.py",
-    "gpu:setup": "uv run python scripts/setup_fast3r.py",
-    "gpu:check": "uv run python scripts/setup_fast3r.py --check",
+    "gpu:setup": "uv run python scripts/setup_gpu.py",
+    "gpu:check": "uv run python scripts/setup_gpu.py --check",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

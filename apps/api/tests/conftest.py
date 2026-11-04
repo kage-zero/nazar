@@ -15,6 +15,15 @@ EMAIL = "ops@example.org"
 PASSWORD = "correct horse battery"
 
 
+@pytest.fixture(autouse=True)
+def cpu_only(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """API tests run the CPU path even where the GPU environments are installed; tests marked
+    `gpu` use them."""
+    if request.node.get_closest_marker("gpu") is None:
+        for var in ("NAZAR_FAST3R_PYTHON", "NAZAR_GPU_PYTHON", "NAZAR_SPLAT_PYTHON"):
+            monkeypatch.setenv(var, "")
+
+
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
     overrides.setdefault("env", "test")
     return Settings(_env_file=None, storage_dir=tmp_path, **overrides)

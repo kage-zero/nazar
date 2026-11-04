@@ -66,12 +66,17 @@ Shortcut on the laptop: `run-college.bat` (asks Online or Bundle, preselects Col
 In the VDI for online mode: `bash scripts/run-college-worker.sh <laptop IP>` (asks for the
 token with input hidden).
 ```bash
-uv run python scripts/setup_fast3r.py          # needs PyPI + Hugging Face from the VDI
-uv run python scripts/setup_fast3r.py --check  # must end with "Fast3R runtime OK"
+uv run python scripts/setup_gpu.py --profile clg          # lists sizes, asks before downloading
+uv run python scripts/setup_gpu.py --profile clg --check  # must end with "GPU runtime OK"
 ```
+- Needs PyPI, download.pytorch.org, docs.gsplat.studio, GitHub and Hugging Face from the VDI
+  (~14 GB for the `clg` profile: envs ~6 GB, weights ~8.6 GB incl. Metric3D giant2 5.5 GB).
 - Linux path of the script is untested: paste errors, don't work around them.
-- If Hugging Face is blocked: upload `var/gpu/weights/Fast3R_ViT_Large_512/` (≈ 2.5 GB) via
-  portal Storage, then `--check --hash`.
+- If Hugging Face is blocked: upload `var/gpu/weights/` via portal Storage, then
+  `--check --hash`.
+- Full pipeline on one clip, no API needed (every model must run on `clg`):
+  `uv run --package nazar-worker python scripts/test_full_pipeline.py --video docs/sample/video/sample2.mp4 --how clg`
+  Paste the final summary (contributions, peak VRAM per model).
 - [ ] One measured run of sample1:
   - online: `NAZAR_WORKER_TOKEN=<type it> uv run nazar-worker run --api http://<laptop IP>:8000 --modes standard --location college`, then in the laptop browser set **Run on → College GPU** and press Reconstruct (the panel shows whether the college worker is online);
   - bundle: on the laptop choose **Run on → College GPU**, press Reconstruct, then `bundle export` (it takes college jobs by default); in the VDI `uv run nazar-worker bundle run mission.zip --out result.zip`; import on the laptop;

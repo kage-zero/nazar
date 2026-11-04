@@ -122,6 +122,123 @@ def write_glb(
     )
 
 
+TRIANGLES = 4
+UNSIGNED_INT = 5125
+ELEMENT_ARRAY_BUFFER = 34963
+
+
+def write_mesh_glb(
+    vertices: npt.NDArray[np.floating[Any]],
+    faces: npt.NDArray[np.integer[Any]],
+    colors: npt.NDArray[np.uint8],
+    normals: npt.NDArray[np.floating[Any]] | None = None,
+    *,
+    extras: dict[str, Any] | None = None,
+) -> bytes:
+    """One TRIANGLES mesh with POSITION, NORMAL (optional) and COLOR_0 (normalised uint8
+    RGBA), indexed by uint32. Same axes and unit conventions as `write_glb`."""
+    pos = np.ascontiguousarray(vertices, dtype=np.float32)
+    idx = np.ascontiguousarray(faces, dtype=np.uint32).reshape(-1)
+    if len(pos) == 0 or len(idx) == 0 or not np.isfinite(pos).all():
+        raise ValueError("Mesh GLB export needs vertices, faces and finite coordinates.")
+    if idx.max() >= len(pos):
+        raise ValueError("Face index out of range.")
+    rgba = np.empty((len(pos), 4), dtype=np.uint8)
+    rgba[:, :3] = colors
+    rgba[:, 3] = 255
+    blobs: list[tuple[bytes, int]] = [
+        (idx.tobytes(), ELEMENT_ARRAY_BUFFER),
+        (pos.tobytes(), ARRAY_BUFFER),
+        (rgba.tobytes(), ARRAY_BUFFER),
+    ]
+    accessors: list[dict[str, Any]] = [
+        {"bufferView": 0, "componentType": UNSIGNED_INT, "count": len(idx), "type": "SCALAR"},
+        {
+            "bufferView": 1,
+            "componentType": FLOAT,
+            "count": len(pos),
+            "type": "VEC3",
+            "min": pos.min(axis=0).tolist(),
+            "max": pos.max(axis=0).tolist(),
+        },
+        {
+            "bufferView": 2,
+            "componentType": UNSIGNED_BYTE,
+            "normalized": True,
+            "count": len(pos),
+            "type": "VEC4",
+        },
+    ]
+    attributes = {"POSITION": 1, "COLOR_0": 2}
+    if normals is not None:
+        nrm = np.ascontiguousarray(normals, dtype=np.float32)
+        blobs.append((nrm.tobytes(), ARRAY_BUFFER))
+        accessors.append(
+            {"bufferView": 3, "componentType": FLOAT, "count": len(nrm), "type": "VEC3"}
+        )
+        attributes["NORMAL"] = 3
+    views, offset, body = [], 0, b""
+    for blob, target in blobs:
+        views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(blob), "target": target})
+        padded = _pad(blob, b"\0")
+        body += padded
+        offset += len(padded)
+    doc = {
+        "asset": {"version": "2.0", "generator": "NAZAR worker", "extras": extras or {}},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "surface", "mesh": 0}],
+        "meshes": [
+            {
+                "name": "surface",
+                "primitives": [{"attributes": attributes, "indices": 0, "mode": TRIANGLES}],
+            }
+        ],
+        "accessors": accessors,
+        "bufferViews": views,
+        "buffers": [{"byteLength": len(body)}],
+    }
+    js = _pad(json.dumps(doc, separators=(",", ":")).encode(), b" ")
+    total = 12 + 8 + len(js) + 8 + len(body)
+    return b"".join(
+        [
+            struct.pack("<III", MAGIC, 2, total),
+            struct.pack("<II", len(js), JSON_CHUNK),
+            js,
+            struct.pack("<II", len(body), BIN_CHUNK),
+            body,
+        ]
+    )
+
+
+@dataclass
+class GlbMesh:
+    doc: dict[str, Any]
+    vertices: npt.NDArray[np.float32]
+    faces: npt.NDArray[np.uint32]
+    colors: npt.NDArray[np.uint8]
+
+
+def read_mesh_glb(data: bytes) -> GlbMesh:
+    """Reads files written by `write_mesh_glb` (tests and checks only)."""
+    js_len = struct.unpack_from("<I", data, 12)[0]
+    doc = json.loads(data[20 : 20 + js_len])
+    body = data[28 + js_len :]
+
+    def view(i: int, dtype: type[np.generic], width: int) -> npt.NDArray[Any]:
+        acc = doc["accessors"][i]
+        bv = doc["bufferViews"][acc["bufferView"]]
+        raw = body[bv["byteOffset"] : bv["byteOffset"] + bv["byteLength"]]
+        return np.frombuffer(raw, dtype=dtype).reshape(acc["count"], width)
+
+    return GlbMesh(
+        doc,
+        view(1, np.float32, 3),
+        view(0, np.uint32, 1).reshape(-1, 3),
+        view(2, np.uint8, 4)[:, :3],
+    )
+
+
 @dataclass
 class GlbScene:
     doc: dict[str, Any]

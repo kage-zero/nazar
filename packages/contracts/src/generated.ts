@@ -75,14 +75,17 @@ export type PipelineMode = 'test' | 'standard';
 /**
  * Processing stages. Each value is also the job status while that stage runs.
  *
+ * Moving objects are masked *before* geometry, so the masks keep them out of the pose
+ * estimate as well as out of the points.
+ *
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "StageName".
  */
 export type StageName =
   | 'preprocessing'
+  | 'dynamic_analysis'
   | 'geometry'
   | 'depth_priors'
-  | 'dynamic_analysis'
   | 'sensor_optimization'
   | 'dense_reconstruction'
   | 'surface_processing'
@@ -103,9 +106,9 @@ export type JobStatus =
   | 'validating'
   | 'queued'
   | 'preprocessing'
+  | 'dynamic_analysis'
   | 'geometry'
   | 'depth_priors'
-  | 'dynamic_analysis'
   | 'sensor_optimization'
   | 'dense_reconstruction'
   | 'surface_processing'

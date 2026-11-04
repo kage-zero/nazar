@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from nazar_contracts import ComputeTarget, PipelineMode
-from nazar_worker import __version__
+from nazar_worker import __version__, local_run
 from nazar_worker.bundle import BundleError, export_bundle, import_result, run_bundle
 from nazar_worker.client import ApiCallFailed, WorkerClient
 from nazar_worker.doctor import collect
@@ -86,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         "or NAZAR_WORKER_LOCATION).",
     )
     _bundle_parser(sub)
+    local_run.add_parser(sub)
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -106,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "bundle":
         return _bundle(args)
+    if args.command == "local":
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+        return local_run.main(args)
 
     try:
         modes = [PipelineMode(m.strip()) for m in args.modes.split(",") if m.strip()]

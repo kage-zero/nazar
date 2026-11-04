@@ -1,6 +1,7 @@
 """REAL DATA: the standard pipeline on the supplied sample video, through the real API and the
-real worker runner in-process. The CPU baseline always runs; Fast3R runs only where its GPU
-runtime is configured (NAZAR_FAST3R_PYTHON / NAZAR_FAST3R_WEIGHTS), otherwise it is skipped."""
+real worker runner in-process. The CPU baseline always runs; the GPU pipeline (Fast3R plus the
+other models) runs only where its runtime is installed (`var/gpu` or NAZAR_*_PYTHON), otherwise
+it is skipped."""
 
 from pathlib import Path
 from typing import Any
@@ -57,9 +58,16 @@ def run_standard(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
     return snap, report
 
 
+def disable_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the CPU-only path even where the GPU environments are installed."""
+    for var in ("NAZAR_FAST3R_PYTHON", "NAZAR_GPU_PYTHON", "NAZAR_SPLAT_PYTHON"):
+        monkeypatch.setenv(var, "")
+
+
 def cloud_points(client: TestClient, snap: dict[str, Any], report: dict[str, Any]) -> int:
     """Point count of the final cloud, checking that its per-point confidence classes match
     the report's counts."""
+    mpu = report["coordinate_frame"]["metres_per_unit"]
     cloud = next(a for a in snap["artifacts"] if a["kind"] == "point_cloud")
     data = client.get(f"/api/artifacts/{cloud['id']}/content").content
     pts = read_ply(data)
@@ -73,17 +81,22 @@ def cloud_points(client: TestClient, snap: dict[str, Any], report: dict[str, Any
     assert export["media_type"] == "application/vnd.las"
     las = read_las(client.get(f"/api/artifacts/{export['id']}/content").content)
     xyz = np.array([p[:3] for p in pts], dtype=np.float64)
-    assert np.abs(las.xyz - to_las_axes(xyz)).max() < 1e-4
+    assert np.abs(las.xyz - to_las_axes(xyz * (mpu or 1.0))).max() < 1e-3
     assert (las.user_data == labels).all()
-    assert las.system_id == "NAZAR local frame, no CRS"
+    if mpu is None:
+        assert las.system_id == "NAZAR local frame, no CRS"
     assert "las" in report["exports"]
     # The GLB holds the same points and colours (glTF shares NAZAR's +Y-up axes) and the path.
-    glb = next(a for a in snap["artifacts"] if a["media_type"] == "model/gltf-binary")
+    glb = next(
+        a
+        for a in snap["artifacts"]
+        if a["kind"] == "export" and a["media_type"] == "model/gltf-binary"
+    )
     scene = read_glb(client.get(f"/api/artifacts/{glb['id']}/content").content)
-    assert np.abs(scene.points - xyz).max() < 1e-4
+    assert np.abs(scene.points - xyz * (mpu or 1.0)).max() < 1e-3
     assert (scene.colors == np.array([p[3:6] for p in pts], dtype=np.uint8)).all()
     assert scene.path is not None and len(scene.path) >= 2
-    assert scene.doc["asset"]["extras"]["units"] == "unitless"
+    assert scene.doc["asset"]["extras"]["units"] == ("metre" if mpu else "unitless")
     return len(pts)
 
 
@@ -94,7 +107,7 @@ def test_cpu_baseline_reconstructs_the_sample(
     app_client: TestClient,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("NAZAR_FAST3R_PYTHON", raising=False)
+    disable_gpu(monkeypatch)
     snap, report = run_standard(app_client)
     assert report["geometry_method"] == "sfm"
     assert report["geometry"]["registered_keyframes"] >= 18
@@ -104,6 +117,7 @@ def test_cpu_baseline_reconstructs_the_sample(
     assert "fast3r_fallback" not in {w["code"] for w in snap["warnings"]}
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not isinstance(FAST3R, Fast3rRuntime), reason=f"{FAST3R}")
 def test_fast3r_reconstructs_the_sample_densely(app_client: TestClient) -> None:  # noqa: F811
     snap, report = run_standard(app_client)
@@ -114,7 +128,12 @@ def test_fast3r_reconstructs_the_sample_densely(app_client: TestClient) -> None:
     n = cloud_points(app_client, snap, report)
     assert n == geometry["points"] and n > 50_000  # dense, unlike the ~6k-point baseline
     assert report["resources"]["peak_vram_mib"] > 0
-    assert {a["provenance"]["producer"] for a in snap["artifacts"]} == {"nazar-worker/fast3r"}
+    cloud = next(a for a in snap["artifacts"] if a["kind"] == "point_cloud")
+    assert cloud["provenance"]["producer"] == "nazar-worker/fast3r"
+    # Every model of the local profile contributed or says why it did not.
+    for key in ("dynamic_analysis", "depth_priors", "surface_processing", "gaussian_splat"):
+        assert key in report["contributions"], key
+    assert report["resources"]["within_gpu_budget"] is not False
     traj = next(a for a in snap["artifacts"] if a["kind"] == "camera_trajectory")
     poses = app_client.get(f"/api/artifacts/{traj['id']}/content").json()["poses"]
     assert len(poses) == report["input"]["keyframes"]
@@ -135,6 +154,7 @@ def test_fast3r_failure_falls_back_to_the_baseline_visibly(
     (weights / "model.safetensors").write_bytes(b"not a checkpoint")
     broken = tmp_path / "python.exe"
     broken.write_text("")  # exists, but is not a runnable interpreter
+    disable_gpu(monkeypatch)
     monkeypatch.setenv("NAZAR_FAST3R_PYTHON", str(broken))
     monkeypatch.setenv("NAZAR_FAST3R_WEIGHTS", str(weights))
     snap, report = run_standard(app_client)
