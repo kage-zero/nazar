@@ -1,8 +1,11 @@
 import { Grid, OrbitControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
-import { useEffect, useRef, type ComponentRef } from 'react';
+import { lazy, Suspense, useEffect, useRef, type ComponentRef } from 'react';
 import { useViewerStore } from '../state/viewerStore';
-import { FitToBounds, MeasureLayer, PointCloudLayer, TrajectoryLayer } from './layers';
+import { FitToBounds, MeasureLayer, MeshLayer, PointCloudLayer, TrajectoryLayer } from './layers';
+
+// Spark is large; it is only fetched once a job actually has a splat.
+const SplatLayer = lazy(() => import('./SplatLayer'));
 
 const HOME_POSITION = [6, 4.5, 8] as const;
 
@@ -16,6 +19,10 @@ export default function ViewerScene() {
   const showAxes = useViewerStore((s) => s.showAxes);
   const showCloud = useViewerStore((s) => s.showCloud);
   const showPath = useViewerStore((s) => s.showPath);
+  const showMesh = useViewerStore((s) => s.showMesh);
+  const showSplat = useViewerStore((s) => s.showSplat);
+  const mesh = useViewerStore((s) => s.mesh);
+  const splat = useViewerStore((s) => s.splat);
   const resetToken = useViewerStore((s) => s.resetToken);
   const cloud = useViewerStore((s) => s.cloud);
   const path = useViewerStore((s) => s.path);
@@ -56,10 +63,20 @@ export default function ViewerScene() {
         />
       )}
       {showAxes && <axesHelper args={[1.5]} />}
-      {cloud && showCloud && <PointCloudLayer key={cloud.job_id} manifest={cloud} />}
+      <hemisphereLight args={['#ffffff', '#444444', 1.6]} />
+      <directionalLight position={[5, 8, 6]} intensity={1.8} />
+      {cloud && <PointCloudLayer key={cloud.job_id} manifest={cloud} visible={showCloud} />}
+      {mesh && <MeshLayer key={`mesh-${mesh.id}`} manifest={mesh} visible={showMesh} />}
+      {splat && (
+        <Suspense fallback={null}>
+          <SplatLayer key={`splat-${splat.id}`} manifest={splat} visible={showSplat} />
+        </Suspense>
+      )}
       {path && showPath && <TrajectoryLayer manifest={path} />}
       <MeasureLayer picks={picks} />
-      {cloud && <FitToBounds bounds={cloud.bounds} />}
+      {(cloud ?? mesh ?? splat) && (
+        <FitToBounds bounds={(cloud ?? mesh ?? splat)?.bounds ?? null} />
+      )}
       <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.1} />
     </Canvas>
   );

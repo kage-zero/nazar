@@ -13,7 +13,7 @@ import { PreflightPanel } from './components/PreflightPanel';
 import { ReadinessPanel } from './components/ReadinessPanel';
 import { Card } from './components/ui';
 import { Viewport } from './components/Viewport';
-import { displayCloud } from './lib/jobState';
+import { displayCloud, displayMesh, displaySplat } from './lib/jobState';
 import { useViewerStore } from './state/viewerStore';
 
 export function App() {
@@ -28,10 +28,12 @@ export function App() {
   const setLayers = useViewerStore((s) => s.setLayers);
   const cloud = displayCloud(job.job);
   const path = job.job?.artifacts.find((a) => a.kind === 'camera_trajectory') ?? null;
+  const mesh = displayMesh(job.job);
+  const splat = displaySplat(job.job);
 
   useEffect(() => {
-    setLayers(cloud, path);
-  }, [cloud, path, setLayers]);
+    setLayers(cloud, path, mesh, splat);
+  }, [cloud, path, mesh, splat, setLayers]);
 
   return (
     <>

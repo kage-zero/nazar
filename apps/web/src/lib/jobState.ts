@@ -129,3 +129,13 @@ export function displayCloud(job: Job | null): ArtifactManifest | null {
   }
   return null;
 }
+
+/** The solid surface mesh (GLB), when the job produced one. */
+export function displayMesh(job: Job | null): ArtifactManifest | null {
+  return job?.artifacts.find((a) => a.kind === 'mesh') ?? null;
+}
+
+/** The photoreal Gaussian splat (PLY), when the job produced one. */
+export function displaySplat(job: Job | null): ArtifactManifest | null {
+  return job?.artifacts.find((a) => a.kind === 'gaussian_scene') ?? null;
+}

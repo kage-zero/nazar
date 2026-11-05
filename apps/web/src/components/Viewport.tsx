@@ -24,7 +24,7 @@ const SCALE_TEXT = {
 
 export function Viewport() {
   const s = useViewerStore();
-  const { cloud, path, loaded } = s;
+  const { cloud, path, loaded, mesh, splat, layerInfo } = s;
   const kindText = loaded?.kind === 'point_cloud' ? 'Final cloud' : 'Preview';
   const confidence = loaded?.confidence ?? null;
   const byConfidence = s.colorBy === 'confidence' && confidence !== null;
@@ -69,6 +69,15 @@ export function Viewport() {
               data-testid="viewer-loaded"
             >
               {kindText} · revision {loaded.revision} · {loaded.points.toLocaleString()} points
+              {layerInfo.triangles !== null &&
+                ` · mesh ${Math.round(layerInfo.triangles).toLocaleString()} triangles`}
+              {layerInfo.splats !== null &&
+                ` · splat ${layerInfo.splats.toLocaleString()} Gaussians`}
+            </p>
+          ) : null}
+          {splat && s.showSplat && layerInfo.splats === null && !s.layerError ? (
+            <p className="font-mono text-xs text-smoke" aria-live="polite">
+              Loading the photoreal splat…
             </p>
           ) : null}
           {measureText ? (
@@ -136,6 +145,26 @@ export function Viewport() {
           </div>
         </dl>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Viewer controls">
+          {splat && (
+            <Button
+              variant="ghost-inverted"
+              aria-pressed={s.showSplat}
+              onClick={s.toggleSplat}
+              data-testid="toggle-splat"
+            >
+              Photoreal splat
+            </Button>
+          )}
+          {mesh && (
+            <Button
+              variant="ghost-inverted"
+              aria-pressed={s.showMesh}
+              onClick={s.toggleMesh}
+              data-testid="toggle-mesh"
+            >
+              Solid mesh
+            </Button>
+          )}
           {cloud && (
             <Button variant="ghost-inverted" aria-pressed={s.showCloud} onClick={s.toggleCloud}>
               Points
@@ -152,7 +181,7 @@ export function Viewport() {
               Colour by confidence
             </Button>
           )}
-          {cloud && (
+          {(cloud ?? mesh) && (
             <Button variant="ghost-inverted" aria-pressed={s.measuring} onClick={s.toggleMeasure}>
               Measure
             </Button>
@@ -168,7 +197,7 @@ export function Viewport() {
           <Button variant="ghost-inverted" aria-pressed={s.showAxes} onClick={s.toggleAxes}>
             Axes
           </Button>
-          {cloud && (
+          {(cloud ?? mesh ?? splat) && (
             <Button variant="ghost-inverted" onClick={s.requestFit}>
               Fit
             </Button>

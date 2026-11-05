@@ -2,7 +2,16 @@ import type { ArtifactManifest } from '@nazar/contracts';
 import { Line } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import { useEffect, useState } from 'react';
-import { Float32BufferAttribute, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
+import {
+  Color,
+  Float32BufferAttribute,
+  Mesh,
+  SRGBColorSpace,
+  Vector3,
+  type BufferAttribute,
+  type BufferGeometry,
+} from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { jobs } from '../api/jobs';
 import type { Vec3 } from '../lib/measure';
@@ -27,7 +36,13 @@ interface ParsedCloud {
  * GPU buffer is disposed); requests for superseded revisions are aborted, so a late response
  * can never overwrite a newer cloud.
  */
-export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
+export function PointCloudLayer({
+  manifest,
+  visible = true,
+}: {
+  manifest: ArtifactManifest;
+  visible?: boolean;
+}) {
   const [cloud, setCloud] = useState<ParsedCloud | null>(null);
   const colorBy = useViewerStore((s) => s.colorBy);
   const measuring = useViewerStore((s) => s.measuring);
@@ -86,8 +101,9 @@ export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
   return (
     <points
       geometry={cloud.geometry}
+      visible={visible}
       onClick={(e) => {
-        if (!measuring) return;
+        if (!measuring || !visible) return;
         e.stopPropagation();
         // Snap to the clicked point itself, not the ray's closest approach to it.
         const position = cloud.geometry.getAttribute('position');
@@ -97,6 +113,106 @@ export function PointCloudLayer({ manifest }: { manifest: ArtifactManifest }) {
     >
       <pointsMaterial size={0.06} sizeAttenuation vertexColors />
     </points>
+  );
+}
+
+/** sRGB byte -> linear float, so the mesh's vertex colours match the photographed colours. */
+const SRGB_TO_LINEAR = (() => {
+  const table = new Float32Array(256);
+  const c = new Color();
+  for (let i = 0; i < 256; i++) {
+    c.setRGB(i / 255, i / 255, i / 255, SRGBColorSpace);
+    table[i] = c.r;
+  }
+  return table;
+})();
+
+function linearColors(source: BufferAttribute): Float32BufferAttribute {
+  const out = new Float32Array(source.count * 3);
+  const unit = (v: number) => (source.normalized ? v : v / 255);
+  for (let i = 0; i < source.count; i++) {
+    out[i * 3] = SRGB_TO_LINEAR[Math.round(unit(source.getX(i)) * 255)] ?? 0;
+    out[i * 3 + 1] = SRGB_TO_LINEAR[Math.round(unit(source.getY(i)) * 255)] ?? 0;
+    out[i * 3 + 2] = SRGB_TO_LINEAR[Math.round(unit(source.getZ(i)) * 255)] ?? 0;
+  }
+  return new Float32BufferAttribute(out, 3);
+}
+
+/**
+ * The solid surface (GLB triangles with vertex colours). Lit, so its shape reads; parts the
+ * cameras never saw are inferred surface and are described in the report, not hidden here.
+ */
+export function MeshLayer({
+  manifest,
+  visible = true,
+}: {
+  manifest: ArtifactManifest;
+  visible?: boolean;
+}) {
+  const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+  const measuring = useViewerStore((s) => s.measuring);
+  const pick = useViewerStore((s) => s.pick);
+  const setLayerInfo = useViewerStore((s) => s.setLayerInfo);
+  const setLayerError = useViewerStore((s) => s.setLayerError);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchArtifact(manifest.id, controller.signal)
+      .then((buffer) => {
+        new GLTFLoader().parse(
+          buffer,
+          '',
+          (gltf) => {
+            const found: BufferGeometry[] = [];
+            gltf.scene.traverse((o) => {
+              if (o instanceof Mesh) found.push(o.geometry as BufferGeometry);
+            });
+            const geo = found[0];
+            if (!geo || controller.signal.aborted) return;
+            const color = geo.getAttribute('color') as BufferAttribute | undefined;
+            if (color) geo.setAttribute('color', linearColors(color));
+            if (!(geo.getAttribute('normal') as BufferAttribute | undefined))
+              geo.computeVertexNormals();
+            geo.computeBoundingSphere();
+            setGeometry(geo);
+            setLayerInfo({
+              triangles: geo.index ? geo.index.count / 3 : geo.getAttribute('position').count / 3,
+            });
+          },
+          () => {
+            if (!controller.signal.aborted) setLayerError('The surface mesh could not be read.');
+          },
+        );
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setLayerError(err instanceof Error ? err.message : 'Mesh failed to load.');
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [manifest.id, manifest.revision, setLayerInfo, setLayerError]);
+
+  useEffect(
+    () => () => {
+      geometry?.dispose();
+    },
+    [geometry],
+  );
+
+  if (!geometry) return null;
+  return (
+    <mesh
+      geometry={geometry}
+      visible={visible}
+      onClick={(e) => {
+        if (!measuring || !visible) return;
+        e.stopPropagation();
+        pick([e.point.x, e.point.y, e.point.z]);
+      }}
+    >
+      <meshStandardMaterial vertexColors roughness={0.95} metalness={0} side={2} />
+    </mesh>
   );
 }
 
