@@ -344,6 +344,7 @@ class _Stage:
             raise StageFailed(f"{what} failed {where}: {exc}", retryable=True) from exc
         if done.get("peak_vram_mib") is not None:
             run.gpu_peaks[key] = int(done["peak_vram_mib"])
+            ctx.gpu(int(done["peak_vram_mib"]), int(done.get("budget_mib") or 0))
         return done
 
 
@@ -515,6 +516,7 @@ class Geometry(_Stage):
             }
             if stats.get("peak_vram_mib") is not None:
                 run.gpu_peaks["geometry"] = int(stats["peak_vram_mib"])
+                ctx.gpu(int(stats["peak_vram_mib"]), int(stats.get("budget_mib") or 0))
         run.timings["geometry_s"] = round(time.monotonic() - t0, 3)
 
     def _fast3r(self, ctx: StageContext, runtime: Fast3rRuntime) -> None:
@@ -903,7 +905,12 @@ class Densify(_Stage):
             ply,
         )
         poses = [
-            {"keyframe": i, "frame_index": run.keyframe_index[i], "position": c.round(5).tolist()}
+            {
+                "keyframe": i,
+                "frame_index": run.keyframe_index[i],
+                "time_s": round(run.keyframe_times[i], 4),
+                "position": c.round(5).tolist(),
+            }
             for i, c in zip(run.placed(), centers, strict=True)
         ]
         cam_source = (

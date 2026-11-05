@@ -1,6 +1,6 @@
 """Run the whole standard pipeline on one video, in-process, with no API or web app.
 
-    nazar-worker local --video PATH --how local|clg [--telemetry PATH] [--out DIR]
+    nazar-worker local --video PATH --how local|clg [--fps 1] [--telemetry PATH] [--out DIR]
 
 The same stage adapters as a leased job run against `LocalClient`, which serves the
 preflight and keyframes from disk and writes every artifact to `<out>/artifacts`. Model
@@ -24,8 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from nazar_contracts import (
+    FPS_DEFAULT,
+    FPS_MAX,
+    FPS_MIN,
+    MAX_FRAMES,
     ArtifactCreate,
     ArtifactCreated,
+    ComputeTarget,
     EventType,
     JobStatus,
     PipelineMode,
@@ -35,8 +40,10 @@ from nazar_contracts import (
     WorkerLease,
 )
 from nazar_media import MediaError, run_preflight
+from nazar_media.sampling import sample_job_frames
 from nazar_media.telemetry import TelemetryError, parse_telemetry, track_to_json
 from nazar_worker.fast3r import Fast3rRuntime
+from nazar_worker.forecast import Forecast
 from nazar_worker.gpu import GpuRuntime
 from nazar_worker.profile import PROFILES, ComputeProfile
 from nazar_worker.runner import JobRun
@@ -131,6 +138,12 @@ def _print_event(e: dict[str, Any]) -> None:
         done, total, unit = data.get("completed"), data.get("total"), data.get("unit") or ""
         count = f" ({done}/{total} {unit})" if done is not None and total else ""
         print(f"{prefix} {data.get('message', '')}{count}", flush=True)
+    elif kind == EventType.JOB_ESTIMATE.value:
+        print(
+            f"{prefix} estimated {data['total_s'] / 60:.1f} min for {data['frames']} frames "
+            f"({data['basis']})",
+            flush=True,
+        )
     elif kind == EventType.STAGE_SKIPPED.value:
         print(f"{prefix} SKIPPED: {data.get('reason')}", flush=True)
     elif kind == EventType.WARNING.value:
@@ -155,12 +168,13 @@ def run_local(
     profile: ComputeProfile,
     out: Path,
     telemetry: Path | None = None,
+    fps: float = FPS_DEFAULT,
 ) -> int:
     if not video.is_file():
         print(f"Video not found: {video}", file=sys.stderr)
         return 2
     out.mkdir(parents=True, exist_ok=True)
-    for sub in ("artifacts", "work", "preflight"):
+    for sub in ("artifacts", "work", "preflight", "frames"):
         shutil.rmtree(out / sub, ignore_errors=True)
     print(f"NAZAR full pipeline · profile {profile.name} · {video}")
     print(f"Output: {out.resolve()}")
@@ -187,9 +201,17 @@ def run_local(
     except MediaError as exc:
         print(f"Video rejected: {exc.message}", file=sys.stderr)
         return 2
+    print(f"  {report.analysis.frames_decoded} frames decoded ({time.monotonic() - t0:.1f} s)")
+    cap = MAX_FRAMES[ComputeTarget.COLLEGE if profile.strict else ComputeTarget.LOCAL]
+    try:
+        plan = sample_job_frames(video, report, fps, cap, out / "frames")
+    except MediaError as exc:
+        print(f"Frames could not be sampled: {exc.message}", file=sys.stderr)
+        return 2
     print(
-        f"  {report.analysis.frames_decoded} frames, {len(report.keyframes)} keyframes "
-        f"({time.monotonic() - t0:.1f} s)"
+        f"  {len(plan.keyframes)} frames at {fps:g} fps "
+        f"(effective {plan.fps_effective:g} fps, cap {cap})"
+        + (f"; lowered from {plan.wanted} by the cap" if plan.clamped else "")
     )
 
     track = None
@@ -200,7 +222,7 @@ def run_local(
             print(f"Telemetry rejected: {exc}", file=sys.stderr)
             return 2
 
-    client = LocalClient(out / "preflight", out, track)
+    client = LocalClient(out / "frames", out, track)
     lease = WorkerLease(
         lease_id="local",
         job_id=f"local-{uuid.uuid4().hex[:8]}",
@@ -209,12 +231,13 @@ def run_local(
         attempt=1,
         lease_expires_at=datetime.now(UTC) + timedelta(days=1),
         video_asset_id="local",
-        keyframe_count=len(report.keyframes),
+        keyframe_count=len(plan.keyframes),
         video_sha256=sha,
         telemetry_asset_id="local" if track is not None else None,
     )
     adapters = build_standard_pipeline(runtime, profile=profile, gpu=gpu, work_dir=out / "work")
-    outcome = JobRun(client, lease, adapters, heartbeat_s=3600).execute()
+    forecast = Forecast.for_worker(profile, gpu)
+    outcome = JobRun(client, lease, adapters, heartbeat_s=3600, forecast=forecast).execute()
     total_s = time.monotonic() - t0
     (out / "events.json").write_text(json.dumps(client.events_log, indent=1), encoding="utf-8")
     return _summary(out, client, profile, outcome, total_s)
@@ -351,6 +374,13 @@ def add_parser(sub: Any) -> None:
         required=True,
         help="local = 6 GB laptop GPU (memory-capped); clg = college GPU.",
     )
+    p.add_argument(
+        "--fps",
+        type=float,
+        default=FPS_DEFAULT,
+        help=f"Frames per second of video to reconstruct from ({FPS_MIN:g}-{FPS_MAX:g}, "
+        f"default {FPS_DEFAULT:g}).",
+    )
     p.add_argument("--telemetry", type=Path, default=None, help="Optional DJI .SRT or .CSV.")
     p.add_argument(
         "--out", type=Path, default=None, help="Output folder (default var/runs/<video>-<how>)."
@@ -359,4 +389,9 @@ def add_parser(sub: Any) -> None:
 
 def main(args: argparse.Namespace) -> int:
     out = args.out or Path("var") / "runs" / f"{args.video.stem}-{args.how}"
-    return run_local(args.video.resolve(), PROFILES[args.how], out.resolve(), args.telemetry)
+    if not FPS_MIN <= args.fps <= FPS_MAX:
+        print(f"--fps must be {FPS_MIN:g}-{FPS_MAX:g}.", file=sys.stderr)
+        return 2
+    return run_local(
+        args.video.resolve(), PROFILES[args.how], out.resolve(), args.telemetry, args.fps
+    )

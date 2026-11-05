@@ -111,6 +111,18 @@
     ]
   },
   "eventSchemaVersion": 1,
+  "fps": {
+    "default": 1.0,
+    "max": 4.0,
+    "min": 0.25
+  },
+  "frames": {
+    "max": {
+      "college": 128,
+      "local": 64
+    },
+    "min": 3
+  },
   "pipelineStages": [
     "preprocessing",
     "dynamic_analysis",

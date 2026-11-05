@@ -71,6 +71,9 @@ class StageContext:
     check_cancel: Callable[[], None]
     telemetry: Callable[[], dict[str, Any] | None] = lambda: None
     """The job's normalised telemetry track, or None (not supplied, or removed since)."""
+    gpu: Callable[[int | None, int | None], None] = lambda peak, budget: None
+    """Report the GPU memory a stage used: (peak MiB, budget MiB; 0 = no cap). The runner adds
+    the largest peak to the stage's `stage.completed` event."""
 
 
 class StageAdapter(Protocol):

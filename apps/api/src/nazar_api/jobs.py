@@ -17,15 +17,18 @@ from sqlalchemy.orm import Session
 
 from nazar_api.models import ArtifactRecord, JobEventRecord, JobRecord, utcnow
 from nazar_contracts import (
+    MAX_FRAMES,
     PIPELINE_STAGES,
     TERMINAL_STATUSES,
     ArtifactManifest,
     ComputeTarget,
     EventType,
     Job,
+    JobEstimateData,
     JobEvent,
     JobStatus,
     PipelineMode,
+    SamplingInfo,
     StageName,
     StageProgressData,
     StageRunState,
@@ -46,6 +49,7 @@ WORKER_EVENT_TYPES = frozenset(
         EventType.STAGE_PROGRESS,
         EventType.STAGE_COMPLETED,
         EventType.STAGE_SKIPPED,
+        EventType.JOB_ESTIMATE,
         EventType.WARNING,
         EventType.JOB_COMPLETED,
         EventType.JOB_FAILED,
@@ -199,11 +203,24 @@ def current_artifacts(db: Session, job: JobRecord) -> list[ArtifactManifest]:
     return [to_manifest(r) for r in newest.values()]
 
 
+def sampling_info(job: JobRecord) -> SamplingInfo | None:
+    if job.frame_count is None or job.fps_effective is None:
+        return None
+    return SamplingInfo(
+        fps_requested=job.fps,
+        fps_effective=job.fps_effective,
+        frames=job.frame_count,
+        cap=MAX_FRAMES[ComputeTarget(job.compute)],
+        clamped=job.frames_clamped,
+    )
+
+
 def snapshot(db: Session, job: JobRecord) -> Job:
     stages = {s: StageState(stage=s, state=StageRunState.PENDING) for s in PIPELINE_STAGES}
     warnings: list[WarningData] = []
     error: str | None = None
     retryable = False
+    estimate: JobEstimateData | None = None
     running: StageName | None = None
     for payload in db.scalars(
         select(JobEventRecord.payload)
@@ -216,6 +233,7 @@ def snapshot(db: Session, job: JobRecord) -> Job:
         if type_ is EventType.JOB_QUEUED:  # a new attempt starts from a clean slate
             stages = {s: StageState(stage=s, state=StageRunState.PENDING) for s in PIPELINE_STAGES}
             warnings, error, retryable, running = [], None, False, None
+            estimate = None
         elif type_ is EventType.STAGE_STARTED and stage:
             stages[stage] = StageState(stage=stage, state=StageRunState.RUNNING)
             running = stage
@@ -225,9 +243,15 @@ def snapshot(db: Session, job: JobRecord) -> Job:
             )
         elif type_ is EventType.STAGE_COMPLETED and stage:
             stages[stage] = StageState(
-                stage=stage, state=StageRunState.COMPLETED, duration_s=data.get("duration_s")
+                stage=stage,
+                state=StageRunState.COMPLETED,
+                duration_s=data.get("duration_s"),
+                peak_vram_mib=data.get("peak_vram_mib"),
+                budget_mib=data.get("budget_mib"),
             )
             running = None
+        elif type_ is EventType.JOB_ESTIMATE:
+            estimate = JobEstimateData.model_validate(data)
         elif type_ is EventType.STAGE_SKIPPED and stage:
             stages[stage] = StageState(
                 stage=stage, state=StageRunState.SKIPPED, reason=data.get("reason")
@@ -255,6 +279,8 @@ def snapshot(db: Session, job: JobRecord) -> Job:
         warnings=warnings,
         error=error,
         retryable=retryable,
+        sampling=sampling_info(job),
+        estimate=estimate,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

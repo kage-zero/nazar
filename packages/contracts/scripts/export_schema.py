@@ -13,6 +13,11 @@ from pydantic import BaseModel
 
 from nazar_contracts import (
     EVENT_SCHEMA_VERSION,
+    FPS_DEFAULT,
+    FPS_MAX,
+    FPS_MIN,
+    MAX_FRAMES,
+    MIN_FRAMES,
     PIPELINE_STAGES,
     TERMINAL_STATUSES,
     ArtifactCreate,
@@ -85,6 +90,8 @@ def render() -> dict[str, str]:
     constants = {
         "eventSchemaVersion": EVENT_SCHEMA_VERSION,
         "pipelineStages": [s.value for s in PIPELINE_STAGES],
+        "fps": {"min": FPS_MIN, "max": FPS_MAX, "default": FPS_DEFAULT},
+        "frames": {"min": MIN_FRAMES, "max": {k.value: v for k, v in MAX_FRAMES.items()}},
         "terminalStatuses": sorted(s.value for s in TERMINAL_STATUSES),
         "allowedTransitions": {
             k.value: sorted(t.value for t in v) for k, v in ALLOWED_TRANSITIONS.items()

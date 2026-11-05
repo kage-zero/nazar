@@ -18,6 +18,7 @@ from nazar_contracts import (
     ArtifactCreated,
     ComputeTarget,
     GeometryBackend,
+    ModelReadiness,
     PipelineMode,
     WorkerEvent,
     WorkerEventAck,
@@ -133,6 +134,7 @@ class WorkerClient:
         geometry: GeometryBackend | None = None,
         job_id: str | None = None,
         location: ComputeTarget | None = None,
+        models: list[ModelReadiness] | None = None,
     ) -> WorkerLease | None:
         """`location` overrides this client's own (bundle import acts for the college)."""
         self.lease_id = None
@@ -142,6 +144,7 @@ class WorkerClient:
             geometry=geometry,
             job_id=job_id,
             location=location or self.location,
+            models=models,
         )
         got = self._json("POST", "/api/worker/lease", body)
         if got is None:

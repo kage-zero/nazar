@@ -117,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_throttle = LoginThrottle()
     app.state.worker_seen_at = {}  # ComputeTarget -> last worker call
     app.state.worker_geometry = {}  # ComputeTarget -> reported geometry backend
+    app.state.worker_models = {}  # ComputeTarget -> models the worker reported
     app.dependency_overrides[get_settings] = lambda: settings
     app.add_middleware(RequireRequestHeader)
     app.add_middleware(
@@ -145,6 +146,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/ready", response_model=ReadinessResponse, tags=["system"])
     def ready(s: SettingsDep) -> ReadinessResponse:
         """Readiness: database, storage, required configuration, accounts, worker, GPU."""
-        return check_readiness(s, app.state.worker_seen_at, app.state.worker_geometry)
+        return check_readiness(
+            s, app.state.worker_seen_at, app.state.worker_geometry, app.state.worker_models
+        )
 
     return app

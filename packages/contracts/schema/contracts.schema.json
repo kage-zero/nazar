@@ -712,6 +712,7 @@
         "stage.progress",
         "stage.completed",
         "stage.skipped",
+        "job.estimate",
         "warning",
         "artifact.available",
         "preview.updated",
@@ -903,6 +904,18 @@
           ],
           "default": null
         },
+        "estimate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobEstimateData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The worker's time forecast, once it has leased the job."
+        },
         "id": {
           "type": "string"
         },
@@ -920,6 +933,18 @@
         "retryable": {
           "default": false,
           "type": "boolean"
+        },
+        "sampling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SamplingInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Frames used (standard pipeline); None for the test pipeline."
         },
         "stages": {
           "items": {
@@ -1140,6 +1165,94 @@
       "title": "JobCreatedData",
       "type": "object"
     },
+    "JobEstimate": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JobEstimateData"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "const": "job.estimate",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "seq",
+        "ts",
+        "status",
+        "type",
+        "data"
+      ],
+      "title": "JobEstimate",
+      "type": "object"
+    },
+    "JobEstimateData": {
+      "description": "The worker's forecast of how long each stage will take, sent once the job is leased.\nClients combine it with the stages' real progress to show the time remaining.",
+      "properties": {
+        "basis": {
+          "description": "Where the numbers come from, in words (shown to the user).",
+          "type": "string"
+        },
+        "frames": {
+          "description": "Frames the estimate was made for.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stages": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Estimated seconds per stage; 0 for a stage already known to be skipped.",
+          "propertyNames": {
+            "$ref": "#/$defs/StageName"
+          },
+          "type": "object"
+        },
+        "total_s": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "frames",
+        "basis",
+        "stages",
+        "total_s"
+      ],
+      "title": "JobEstimateData",
+      "type": "object"
+    },
     "JobFailed": {
       "additionalProperties": false,
       "properties": {
@@ -1335,7 +1448,8 @@
         "start",
         "novelty",
         "max_gap",
-        "end"
+        "end",
+        "sampled"
       ],
       "title": "KeyframeReason",
       "type": "string"
@@ -1396,6 +1510,32 @@
         "name"
       ],
       "title": "MissionCreate",
+      "type": "object"
+    },
+    "ModelReadiness": {
+      "additionalProperties": false,
+      "description": "One model a worker can run: installed or not, and why not.",
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "stage": {
+          "$ref": "#/$defs/StageName"
+        }
+      },
+      "required": [
+        "name",
+        "stage",
+        "ready",
+        "detail"
+      ],
+      "title": "ModelReadiness",
       "type": "object"
     },
     "PipelineMode": {
@@ -1746,6 +1886,41 @@
       "title": "ReadinessResponse",
       "type": "object"
     },
+    "SamplingInfo": {
+      "additionalProperties": false,
+      "description": "Which frames of the video a job uses: chosen at the requested rate, one per time\nwindow (the sharpest usable frame), and lowered to the location's frame cap if needed.",
+      "properties": {
+        "cap": {
+          "description": "Most frames this job's compute location allows.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "clamped": {
+          "description": "True when the request needed more frames than the cap.",
+          "type": "boolean"
+        },
+        "fps_effective": {
+          "description": "Frames actually used per second of video.",
+          "type": "number"
+        },
+        "fps_requested": {
+          "type": "number"
+        },
+        "frames": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fps_requested",
+        "fps_effective",
+        "frames",
+        "cap",
+        "clamped"
+      ],
+      "title": "SamplingInfo",
+      "type": "object"
+    },
     "ScaleStatus": {
       "enum": [
         "unknown",
@@ -1810,9 +1985,35 @@
     },
     "StageCompletedData": {
       "properties": {
+        "budget_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The GPU memory budget it ran under (0: unlimited)."
+        },
         "duration_s": {
           "minimum": 0,
           "type": "number"
+        },
+        "peak_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Peak GPU memory this stage's models used, if any."
         }
       },
       "required": [
@@ -2066,6 +2267,18 @@
     "StageState": {
       "additionalProperties": false,
       "properties": {
+        "budget_mib": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "GPU memory budget it ran under."
+        },
         "duration_s": {
           "anyOf": [
             {
@@ -2076,6 +2289,18 @@
             }
           ],
           "default": null
+        },
+        "peak_vram_mib": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Peak GPU memory it used."
         },
         "progress": {
           "anyOf": [
@@ -2562,6 +2787,17 @@
         "pipeline": {
           "$ref": "#/$defs/PipelineMode"
         },
+        "sampling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SamplingInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "telemetry_asset_id": {
           "anyOf": [
             {
@@ -2627,6 +2863,21 @@
           "default": "local",
           "description": "Only jobs aimed at this location are leased."
         },
+        "models": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ModelReadiness"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Models this worker can run right now (absent: not reported)."
+        },
         "modes": {
           "items": {
             "$ref": "#/$defs/PipelineMode"
@@ -2675,6 +2926,21 @@
         },
         "location": {
           "$ref": "#/$defs/ComputeTarget"
+        },
+        "models": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ModelReadiness"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Models it can run right now (None: not reported)."
         },
         "online": {
           "type": "boolean"
@@ -2730,6 +2996,7 @@
           "job.cancelled": "#/$defs/JobCancelled",
           "job.completed": "#/$defs/JobCompleted",
           "job.created": "#/$defs/JobCreated",
+          "job.estimate": "#/$defs/JobEstimate",
           "job.failed": "#/$defs/JobFailed",
           "job.queued": "#/$defs/JobQueued",
           "preview.updated": "#/$defs/PreviewUpdated",
@@ -2759,6 +3026,9 @@
         },
         {
           "$ref": "#/$defs/StageSkipped"
+        },
+        {
+          "$ref": "#/$defs/JobEstimate"
         },
         {
           "$ref": "#/$defs/WarningRaised"

@@ -49,6 +49,7 @@ export type EventType =
   | 'stage.progress'
   | 'stage.completed'
   | 'stage.skipped'
+  | 'job.estimate'
   | 'warning'
   | 'artifact.available'
   | 'preview.updated'
@@ -125,6 +126,7 @@ export type JobEvent =
   | StageProgress
   | StageCompleted
   | StageSkipped
+  | JobEstimate
   | WarningRaised
   | ArtifactAvailable
   | PreviewUpdated
@@ -136,7 +138,7 @@ export type JobEvent =
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "KeyframeReason".
  */
-export type KeyframeReason = 'start' | 'novelty' | 'max_gap' | 'end';
+export type KeyframeReason = 'start' | 'novelty' | 'max_gap' | 'end' | 'sampled';
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "FrameFlag".
@@ -469,6 +471,10 @@ export interface Job {
   compute?: ComputeTarget;
   created_at: string;
   error?: string | null;
+  /**
+   * The worker's time forecast, once it has leased the job.
+   */
+  estimate?: JobEstimateData | null;
   id: string;
   /**
    * Cursor of the newest event; resume after it.
@@ -477,17 +483,76 @@ export interface Job {
   mission_id: string;
   pipeline: PipelineMode;
   retryable?: boolean;
+  /**
+   * Frames used (standard pipeline); None for the test pipeline.
+   */
+  sampling?: SamplingInfo | null;
   stages: StageState[];
   status: JobStatus;
   updated_at: string;
   warnings: WarningData[];
 }
 /**
+ * The worker's forecast of how long each stage will take, sent once the job is leased.
+ * Clients combine it with the stages' real progress to show the time remaining.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "JobEstimateData".
+ */
+export interface JobEstimateData {
+  /**
+   * Where the numbers come from, in words (shown to the user).
+   */
+  basis: string;
+  /**
+   * Frames the estimate was made for.
+   */
+  frames: number;
+  /**
+   * Estimated seconds per stage; 0 for a stage already known to be skipped.
+   */
+  stages: {
+    [k: string]: number;
+  };
+  total_s: number;
+}
+/**
+ * Which frames of the video a job uses: chosen at the requested rate, one per time
+ * window (the sharpest usable frame), and lowered to the location's frame cap if needed.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "SamplingInfo".
+ */
+export interface SamplingInfo {
+  /**
+   * Most frames this job's compute location allows.
+   */
+  cap: number;
+  /**
+   * True when the request needed more frames than the cap.
+   */
+  clamped: boolean;
+  /**
+   * Frames actually used per second of video.
+   */
+  fps_effective: number;
+  fps_requested: number;
+  frames: number;
+}
+/**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
  * via the `definition` "StageState".
  */
 export interface StageState {
+  /**
+   * GPU memory budget it ran under.
+   */
+  budget_mib?: number | null;
   duration_s?: number | null;
+  /**
+   * Peak GPU memory it used.
+   */
+  peak_vram_mib?: number | null;
   progress?: StageProgressData | null;
   /**
    * Why it was skipped or failed.
@@ -619,7 +684,15 @@ export interface StageCompleted {
  * via the `definition` "StageCompletedData".
  */
 export interface StageCompletedData {
+  /**
+   * The GPU memory budget it ran under (0: unlimited).
+   */
+  budget_mib?: number | null;
   duration_s: number;
+  /**
+   * Peak GPU memory this stage's models used, if any.
+   */
+  peak_vram_mib?: number | null;
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -641,6 +714,20 @@ export interface StageSkipped {
  */
 export interface StageSkippedData {
   reason: string;
+}
+/**
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "JobEstimate".
+ */
+export interface JobEstimate {
+  data: JobEstimateData;
+  job_id: string;
+  schema_version?: 1;
+  seq: number;
+  stage?: StageName | null;
+  status: JobStatus;
+  ts: string;
+  type: 'job.estimate';
 }
 /**
  * This interface was referenced by `NazarContracts`'s JSON-Schema
@@ -930,7 +1017,23 @@ export interface WorkerPresence {
    */
   last_seen_s: number | null;
   location: ComputeTarget1;
+  /**
+   * Models it can run right now (None: not reported).
+   */
+  models?: ModelReadiness[] | null;
   online: boolean;
+}
+/**
+ * One model a worker can run: installed or not, and why not.
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "ModelReadiness".
+ */
+export interface ModelReadiness {
+  detail: string;
+  name: string;
+  ready: boolean;
+  stage: StageName;
 }
 /**
  * Computed from the normalised track. Times are seconds since the video started.
@@ -1047,6 +1150,7 @@ export interface WorkerLease {
   lease_id: string;
   mission_id: string;
   pipeline: PipelineMode;
+  sampling?: SamplingInfo | null;
   /**
    * Accepted telemetry pinned when the job was created; fetch it from `inputs/telemetry`.
    */
@@ -1068,6 +1172,10 @@ export interface WorkerLeaseRequest {
    */
   job_id?: string | null;
   location?: ComputeTarget2;
+  /**
+   * Models this worker can run right now (absent: not reported).
+   */
+  models?: ModelReadiness[] | null;
   /**
    * @minItems 1
    */
