@@ -27,6 +27,10 @@ export interface LayerInfo {
 
 interface ViewerState {
   showGrid: boolean;
+  /** Orbit only through the side the cameras saw (default); false = free orbit. */
+  limitOrbit: boolean;
+  /** Unit horizontal direction from the scene centre to the cameras, from the camera path. */
+  home: Vec3 | null;
   showAxes: boolean;
   showCloud: boolean;
   showMesh: boolean;
@@ -45,6 +49,8 @@ interface ViewerState {
   loaded: LoadedCloud | null;
   layerError: string | null;
   toggleGrid: () => void;
+  toggleLimitOrbit: () => void;
+  setHome: (home: Vec3 | null) => void;
   toggleAxes: () => void;
   toggleCloud: () => void;
   toggleMesh: () => void;
@@ -67,8 +73,10 @@ interface ViewerState {
 }
 
 export const useViewerStore = create<ViewerState>()((set) => ({
-  showGrid: true,
-  showAxes: true,
+  showGrid: false,
+  limitOrbit: true,
+  home: null,
+  showAxes: false,
   showCloud: true,
   showMesh: false,
   showSplat: false,
@@ -87,6 +95,12 @@ export const useViewerStore = create<ViewerState>()((set) => ({
   layerError: null,
   toggleGrid: () => {
     set((s) => ({ showGrid: !s.showGrid }));
+  },
+  toggleLimitOrbit: () => {
+    set((s) => ({ limitOrbit: !s.limitOrbit }));
+  },
+  setHome: (home) => {
+    set({ home });
   },
   toggleAxes: () => {
     set((s) => ({ showAxes: !s.showAxes }));
@@ -120,15 +134,15 @@ export const useViewerStore = create<ViewerState>()((set) => ({
   },
   setLayers: (cloud, path, mesh = null, splat = null) => {
     set((s) => {
-      // The richest result is what the user came to see: when a job's splat (or, failing
-      // that, mesh) first arrives, show it and put the plain points aside. All of it stays
-      // one click away.
+      // The solid surface reads as an object from every allowed angle; the splat only looks
+      // right near the camera's own viewpoint. So the mesh is shown first, then the splat,
+      // and the plain points are put aside. All of it stays one click away.
       const newSplat = splat !== null && s.splat?.job_id !== splat.job_id;
       const newMesh = mesh !== null && s.mesh?.job_id !== mesh.job_id;
-      const view = newSplat
-        ? { showSplat: true, showMesh: false, showCloud: false }
-        : newMesh && splat === null
-          ? { showMesh: true, showSplat: false, showCloud: false }
+      const view = newMesh
+        ? { showMesh: true, showSplat: false, showCloud: false }
+        : newSplat && mesh === null
+          ? { showSplat: true, showMesh: false, showCloud: false }
           : {};
       const gone = cloud === null && mesh === null && splat === null;
       const layerInfo = {
@@ -145,6 +159,7 @@ export const useViewerStore = create<ViewerState>()((set) => ({
         mesh,
         splat,
         layerInfo,
+        home: firstForJob || gone ? null : s.home,
         ...(gone ? { showCloud: true } : {}),
         fitToken: firstForJob ? s.fitToken + 1 : s.fitToken,
         picks: firstForJob || cloud === null ? [] : s.picks,

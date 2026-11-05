@@ -16,6 +16,7 @@ import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { jobs } from '../api/jobs';
 import type { Vec3 } from '../lib/measure';
 import { confidenceColors, countConfidence } from '../lib/confidence';
+import { homeDirection } from '../lib/viewHome';
 import { useViewerStore } from '../state/viewerStore';
 
 async function fetchArtifact(id: string, signal: AbortSignal): Promise<ArrayBuffer> {
@@ -223,6 +224,8 @@ interface TrajectoryDoc {
 /** Camera positions from a `camera_trajectory` artifact, drawn as a path with markers. */
 export function TrajectoryLayer({ manifest }: { manifest: ArtifactManifest }) {
   const [points, setPoints] = useState<[number, number, number][] | null>(null);
+  const bounds = useViewerStore((s) => s.cloud?.bounds ?? s.mesh?.bounds ?? null);
+  const setHome = useViewerStore((s) => s.setHome);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -237,13 +240,23 @@ export function TrajectoryLayer({ manifest }: { manifest: ArtifactManifest }) {
     };
   }, [manifest.id]);
 
+  useEffect(() => {
+    if (!points || !bounds) return;
+    const centre: Vec3 = [
+      (bounds.min[0] + bounds.max[0]) / 2,
+      (bounds.min[1] + bounds.max[1]) / 2,
+      (bounds.min[2] + bounds.max[2]) / 2,
+    ];
+    setHome(homeDirection(points, centre));
+  }, [points, bounds, setHome]);
+
   if (!points || points.length < 2) return null;
   return (
     <group>
-      <Line points={points} color="#9effc5" lineWidth={1.5} />
+      <Line points={points} color="#9effc5" lineWidth={1} />
       {points.map((p, i) => (
         <mesh key={i} position={p}>
-          <sphereGeometry args={[0.08, 8, 8]} />
+          <sphereGeometry args={[0.025, 8, 8]} />
           <meshBasicMaterial color="#9effc5" />
         </mesh>
       ))}
@@ -254,6 +267,7 @@ export function TrajectoryLayer({ manifest }: { manifest: ArtifactManifest }) {
 /** Moves the camera to frame the artifact's bounds whenever `fitToken` changes. */
 export function FitToBounds({ bounds }: { bounds: ArtifactManifest['bounds'] }) {
   const fitToken = useViewerStore((s) => s.fitToken);
+  const home = useViewerStore((s) => s.home);
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as {
     target: Vector3;
@@ -266,7 +280,10 @@ export function FitToBounds({ bounds }: { bounds: ArtifactManifest['bounds'] }) 
     const max = new Vector3(...bounds.max);
     const center = min.clone().add(max).multiplyScalar(0.5);
     const radius = Math.max(max.distanceTo(min) / 2, 0.5);
-    const dir = new Vector3(1, 0.8, 1.2).normalize();
+    // Start on the side the cameras saw, from a modest elevation; else a generic corner.
+    const dir = home
+      ? new Vector3(home[0], 0.55, home[2]).normalize()
+      : new Vector3(1, 0.8, 1.2).normalize();
     camera.position.copy(center.clone().add(dir.multiplyScalar(radius * 2.2)));
     camera.lookAt(center);
     if (controls) {
@@ -275,7 +292,7 @@ export function FitToBounds({ bounds }: { bounds: ArtifactManifest['bounds'] }) 
     }
     // Only an explicit fit request moves the camera; new revisions with new bounds do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fitToken, camera, controls]);
+  }, [fitToken, home, camera, controls]);
 
   return null;
 }

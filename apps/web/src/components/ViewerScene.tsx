@@ -1,6 +1,7 @@
 import { Grid, OrbitControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { lazy, Suspense, useEffect, useRef, type ComponentRef } from 'react';
+import { azimuthLimits, POLAR_MAX, POLAR_MIN } from '../lib/viewHome';
 import { useViewerStore } from '../state/viewerStore';
 import { FitToBounds, MeasureLayer, MeshLayer, PointCloudLayer, TrajectoryLayer } from './layers';
 
@@ -24,9 +25,13 @@ export default function ViewerScene() {
   const mesh = useViewerStore((s) => s.mesh);
   const splat = useViewerStore((s) => s.splat);
   const resetToken = useViewerStore((s) => s.resetToken);
+  const limitOrbit = useViewerStore((s) => s.limitOrbit);
+  const home = useViewerStore((s) => s.home);
   const cloud = useViewerStore((s) => s.cloud);
   const path = useViewerStore((s) => s.path);
   const picks = useViewerStore((s) => s.picks);
+
+  const limits = limitOrbit && home && (mesh ?? cloud) ? azimuthLimits(home) : null;
 
   useEffect(() => {
     if (resetToken > 0) controls.current?.reset();
@@ -77,7 +82,16 @@ export default function ViewerScene() {
       {(cloud ?? mesh ?? splat) && (
         <FitToBounds bounds={(cloud ?? mesh ?? splat)?.bounds ?? null} />
       )}
-      <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.1} />
+      <OrbitControls
+        ref={controls}
+        makeDefault
+        enableDamping
+        dampingFactor={0.1}
+        minAzimuthAngle={limits?.min ?? -Infinity}
+        maxAzimuthAngle={limits?.max ?? Infinity}
+        minPolarAngle={limits ? POLAR_MIN : 0}
+        maxPolarAngle={limits ? POLAR_MAX : Math.PI}
+      />
     </Canvas>
   );
 }

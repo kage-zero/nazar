@@ -75,6 +75,12 @@ export function Viewport() {
                 ` · splat ${layerInfo.splats.toLocaleString()} Gaussians`}
             </p>
           ) : null}
+          {s.limitOrbit && s.home && (mesh ?? cloud) ? (
+            <p className="font-mono text-xs text-smoke" data-testid="orbit-note">
+              Viewing the side the camera saw. The far side was never filmed, so it is not in the
+              model. Free orbit shows it anyway.
+            </p>
+          ) : null}
           {splat && s.showSplat && layerInfo.splats === null && !s.layerError ? (
             <p className="font-mono text-xs text-smoke" aria-live="polite">
               Loading the photoreal splat…
@@ -152,7 +158,7 @@ export function Viewport() {
               onClick={s.toggleSplat}
               data-testid="toggle-splat"
             >
-              Photoreal splat
+              Photoreal splat (front only)
             </Button>
           )}
           {mesh && (
@@ -189,6 +195,16 @@ export function Viewport() {
           {path && (
             <Button variant="ghost-inverted" aria-pressed={s.showPath} onClick={s.togglePath}>
               Camera path
+            </Button>
+          )}
+          {(cloud ?? mesh) && (
+            <Button
+              variant="ghost-inverted"
+              aria-pressed={!s.limitOrbit}
+              onClick={s.toggleLimitOrbit}
+              data-testid="toggle-free-orbit"
+            >
+              Free orbit
             </Button>
           )}
           <Button variant="ghost-inverted" aria-pressed={s.showGrid} onClick={s.toggleGrid}>

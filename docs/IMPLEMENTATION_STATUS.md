@@ -12,6 +12,10 @@ Found and fixed by that run: the splat never drew (a disposed `SparkRenderer` wa
 
 Not done: local frame cap of 64 untested at high fps on 6 GB; college profile weights (about 6.5 GB) not downloaded and its forecast unmeasured; Metric3D scale still reported, not applied; no texture baking, so the mesh stays vertex-coloured. See [`DEMO.md`](DEMO.md).
 
+### Viewer polish after first review (2026-11-05)
+
+Feedback: the model looked like points and bumpy mesh from any angle but the filming one, and the grid hurt it. Changes: grid and axes off by default; the solid mesh is shown first (the splat smears into streaks off-axis, so it is labelled "front only"); the orbit is limited to 60 degrees either side of the side the cameras saw (home direction from the camera path), with a **Free orbit** button and a note that the far side was never filmed; the mesh gets Taubin smoothing (20 iterations, volume-preserving) in `surface_runner.py`; camera markers shrunk. Checked by re-running sample1 through the browser and viewing from several angles; e2e 27 passed. Limit that remains: one pass of video gives a one-sided relief, not a closed object. Seen from low angles it is a thin sheet. A closed, all-round model needs footage from more sides, or a generative completion step, which this project does not claim to do.
+
 ## Current milestone: **Full model pipeline (branch `feature/full-pipeline`) — video in, explainable 3D model out**
 
 Every model from the brief is now wired in sequence: YOLO11 + SAM 2 (moving-object masks) → Fast3R (poses + dense points) → Metric3D-v2 (depth + normals) → fusion → gsplat Gaussian splat (with pose refinement) → Open3D Poisson mesh. Each model's contribution, peak VRAM and any skip reason is in `report.json` (`contributions`). Two profiles: `local` (6 GB laptop, hard 5.5 GiB budget, a model may be skipped only on out-of-memory) and `clg` (college GPU, strict, larger models). Test it with:
