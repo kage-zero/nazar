@@ -35,10 +35,23 @@ export function stageElapsedS(state: StageState | undefined, nowMs: number): num
   return Math.max(0, (nowMs - Date.parse(state.started_at)) / 1000);
 }
 
+/**
+ * Share of the fuse-and-splat stage taken by fusing (the rest is splat training). Measured
+ * on the RTX 4050 run: fusion ~45 s of ~340 s. Its progress counts something else than the
+ * splat's iterations, so without this the bar would reach 98 % and then fall back to 6 %.
+ */
+const FUSION_SHARE = 0.12;
+
 export function stageFraction(state: StageState | undefined): number | null {
   const p = state?.progress;
   if (p?.total != null && p.total > 0 && p.completed != null) {
-    return Math.min(1, p.completed / p.total);
+    const done = Math.min(1, p.completed / p.total);
+    if (state?.stage === 'dense_reconstruction') {
+      return p.unit === 'iterations'
+        ? FUSION_SHARE + done * (1 - FUSION_SHARE)
+        : done * FUSION_SHARE;
+    }
+    return done;
   }
   return null;
 }

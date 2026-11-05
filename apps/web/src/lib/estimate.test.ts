@@ -1,6 +1,13 @@
 import { PIPELINE_STAGES, type Job, type StageName, type StageState } from '@nazar/contracts';
 import { describe, expect, it } from 'vitest';
-import { forecast, formatClock, formatDuration, formatRange, stagePosition } from './estimate';
+import {
+  forecast,
+  formatClock,
+  formatDuration,
+  formatRange,
+  stageFraction,
+  stagePosition,
+} from './estimate';
 
 const T0 = Date.parse('2026-11-05T10:00:00Z');
 const at = (s: number) => new Date(T0 + s * 1000).toISOString();
@@ -88,8 +95,8 @@ describe('forecast', () => {
       }),
       T0 + 100_000,
     );
-    // 100 s for a quarter of the iterations: 300 s more for the stage, then the later stages.
-    const denseLeft = 100 / 0.25 - 100;
+    // 100 s for the first 34 % of the stage (fusion + a quarter of the iterations).
+    const denseLeft = 100 / 0.34 - 100;
     expect(f?.remainingS).toBeGreaterThan(denseLeft + 22);
     expect(f?.remainingS).toBeLessThan(denseLeft + 22 + 5 + 120 + 80);
   });
@@ -139,5 +146,28 @@ describe('stagePosition', () => {
   });
   it('is null when nothing runs', () => {
     expect(stagePosition(job({}))).toBeNull();
+  });
+});
+
+describe('stageFraction for the fuse-and-splat stage', () => {
+  const dense = (completed: number, total: number, unit: string): StageState => ({
+    stage: 'dense_reconstruction',
+    state: 'running',
+    progress: { message: 'm', completed, total, unit },
+  });
+  it('fusion progress stays in the first share, splat iterations fill the rest', () => {
+    expect(stageFraction(dense(100, 100, 'steps'))).toBeCloseTo(0.12);
+    expect(stageFraction(dense(0, 4000, 'iterations'))).toBeCloseTo(0.12);
+    expect(stageFraction(dense(2000, 4000, 'iterations'))).toBeCloseTo(0.56);
+    expect(stageFraction(dense(4000, 4000, 'iterations'))).toBe(1);
+  });
+  it('other stages are unchanged', () => {
+    expect(
+      stageFraction({
+        stage: 'geometry',
+        state: 'running',
+        progress: { message: 'm', completed: 5, total: 10, unit: 'keyframes' },
+      }),
+    ).toBe(0.5);
   });
 });

@@ -106,7 +106,10 @@ export function App() {
             )}
             <ReadinessPanel status={status} />
           </div>
-          <Viewport />
+          {/* Stays in view and keeps a fixed height while the (long) results column scrolls. */}
+          <div className="lg:sticky lg:top-4 lg:h-[min(calc(100vh-2rem),900px)] lg:self-start">
+            <Viewport />
+          </div>
         </div>
 
         {readyVideo && <PreflightPanel key={readyVideo.id} assetId={readyVideo.id} />}

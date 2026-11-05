@@ -1,7 +1,7 @@
 import type { ArtifactManifest } from '@nazar/contracts';
 import { useThree } from '@react-three/fiber';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { jobs } from '../api/jobs';
 import { useViewerStore } from '../state/viewerStore';
 
@@ -19,15 +19,19 @@ export default function SplatLayer({
   const gl = useThree((s) => s.gl);
   const setLayerInfo = useViewerStore((s) => s.setLayerInfo);
   const setLayerError = useViewerStore((s) => s.setLayerError);
-  const spark = useMemo(() => new SparkRenderer({ renderer: gl }), [gl]);
+  // Created in an effect, not memoised: a disposed renderer must never be reused (React's
+  // development double-invoke runs the cleanup once before the layer is really mounted).
+  const [spark, setSpark] = useState<SparkRenderer | null>(null);
   const [splat, setSplat] = useState<SplatMesh | null>(null);
 
-  useEffect(
-    () => () => {
-      spark.dispose();
-    },
-    [spark],
-  );
+  useEffect(() => {
+    const created = new SparkRenderer({ renderer: gl });
+    setSpark(created);
+    return () => {
+      setSpark(null);
+      created.dispose();
+    };
+  }, [gl]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -61,8 +65,8 @@ export default function SplatLayer({
 
   return (
     <>
-      <primitive object={spark} />
-      {splat && <primitive object={splat} visible={visible} />}
+      {spark && <primitive object={spark} />}
+      {spark && splat && <primitive object={splat} visible={visible} />}
     </>
   );
 }

@@ -42,7 +42,7 @@ export function Viewport() {
       inverted
       id="viewer"
       aria-labelledby="viewer-heading"
-      className="flex min-h-[420px] flex-col gap-4 lg:min-h-[560px]"
+      className="flex h-full min-h-[420px] flex-col gap-4 lg:min-h-[560px]"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="viewer-heading" className="mono-label text-smoke">

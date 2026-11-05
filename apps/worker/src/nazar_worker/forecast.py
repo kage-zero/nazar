@@ -173,10 +173,19 @@ class Forecast:
         runs = history.get(self.key, {}).get(stage.value, [])
         ratios = []
         for run in runs[-HISTORY:]:
+            # A stage that did different work then (no splat trained) says nothing about now.
+            if bool(run.get("full", True)) != self._full(stage):
+                continue
             predicted = self.modelled(stage, int(run["frames"]), telemetry)
             if predicted > 0 and run["seconds"] > 0:
-                ratios.append(run["seconds"] / predicted)
+                ratio = run["seconds"] / predicted
+                if 0.2 <= ratio <= 5:  # outside this the model, not the machine, is wrong
+                    ratios.append(ratio)
         return statistics.median(ratios) if ratios else None
+
+    def _full(self, stage: StageName) -> bool:
+        """Whether `stage` does all of its work here (dense: including the splat)."""
+        return self.ready[stage] if stage is StageName.DENSE_RECONSTRUCTION else True
 
     def estimate(self, frames: int, telemetry: bool) -> JobEstimateData:
         history = self._history()
@@ -223,7 +232,7 @@ class Forecast:
             return
         history = self._history()
         runs = history.setdefault(self.key, {}).setdefault(stage.value, [])
-        runs.append({"frames": frames, "seconds": round(seconds, 2)})
+        runs.append({"frames": frames, "seconds": round(seconds, 2), "full": self._full(stage)})
         del runs[:-HISTORY]
         try:
             self.store.parent.mkdir(parents=True, exist_ok=True)

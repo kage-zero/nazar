@@ -97,3 +97,26 @@ def test_readiness_names_what_is_missing(tmp_path: Path) -> None:
     assert not rows["YOLO"].ready
     assert "not set up" in rows["YOLO"].detail
     assert next(m.stage for m in rows.values()) is StageName.DYNAMIC_ANALYSIS
+
+
+def test_runs_without_a_splat_do_not_calibrate_a_run_with_one(tmp_path: Path) -> None:
+    """Regression: 0.06 s 'dense' stages from splat-less runs halved the real estimate."""
+    store = tmp_path / "t.json"
+    no_splat = forecast(ready={**ALL_READY, StageName.DENSE_RECONSTRUCTION: False}, store=store)
+    for _ in range(3):
+        no_splat.record(StageName.DENSE_RECONSTRUCTION, 22, 0.06)
+    full = forecast(store=store)
+    planned = full.estimate(22, False).stages[StageName.DENSE_RECONSTRUCTION]
+    for seconds in (300.0, 330.0):
+        full.record(StageName.DENSE_RECONSTRUCTION, 22, seconds)
+    after = full.estimate(22, False).stages[StageName.DENSE_RECONSTRUCTION]
+    assert 290 < after < 340, (planned, after)
+
+
+def test_implausible_old_timings_are_ignored(tmp_path: Path) -> None:
+    store = tmp_path / "t.json"
+    f = forecast(store=store)
+    base = f.estimate(22, False).stages[StageName.DENSE_RECONSTRUCTION]
+    for _ in range(4):
+        f.record(StageName.DENSE_RECONSTRUCTION, 22, 0.06)
+    assert f.estimate(22, False).stages[StageName.DENSE_RECONSTRUCTION] == base
