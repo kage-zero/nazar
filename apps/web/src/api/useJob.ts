@@ -96,8 +96,8 @@ export function useJob(missionId: string | null) {
     loaded: missionId !== null && loadedFor === missionId,
     stream: active ? stream : 'closed',
     error,
-    start: (pipeline: PipelineMode, compute: ComputeTarget = 'local') =>
-      missionId ? run(() => api.create(missionId, pipeline, compute)) : Promise.resolve(),
+    start: (pipeline: PipelineMode, compute: ComputeTarget = 'local', fps?: number) =>
+      missionId ? run(() => api.create(missionId, pipeline, compute, fps)) : Promise.resolve(),
     cancel: () => (jobId ? run(() => api.cancel(jobId)) : Promise.resolve()),
     retry: () => (jobId ? run(() => api.retry(jobId)) : Promise.resolve()),
   };

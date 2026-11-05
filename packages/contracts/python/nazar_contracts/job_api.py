@@ -71,6 +71,9 @@ class StageState(_Model):
     progress: StageProgressData | None = None
     peak_vram_mib: int | None = Field(default=None, description="Peak GPU memory it used.")
     budget_mib: int | None = Field(default=None, description="GPU memory budget it ran under.")
+    started_at: datetime | None = Field(
+        default=None, description="When the stage started (server clock)."
+    )
 
 
 class SamplingInfo(_Model):
@@ -82,6 +85,15 @@ class SamplingInfo(_Model):
     frames: int = Field(ge=0)
     cap: int = Field(ge=1, description="Most frames this job's compute location allows.")
     clamped: bool = Field(description="True when the request needed more frames than the cap.")
+
+
+class TimeModel(_Model):
+    """A worker's total job time as a straight line in the frame count, so the UI can quote an
+    estimate before a job exists: `fixed_s + per_frame_s * frames` (no telemetry assumed)."""
+
+    fixed_s: float = Field(ge=0)
+    per_frame_s: float = Field(ge=0)
+    basis: str
 
 
 class ModelReadiness(_Model):
@@ -155,6 +167,9 @@ class WorkerLeaseRequest(_Model):
     )
     models: list[ModelReadiness] | None = Field(
         default=None, description="Models this worker can run right now (absent: not reported)."
+    )
+    time_model: TimeModel | None = Field(
+        default=None, description="How long this worker takes per frame (absent: not reported)."
     )
 
 

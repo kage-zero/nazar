@@ -111,6 +111,8 @@ def lease(
         request.app.state.worker_geometry[body.location] = body.geometry
     if body.models is not None:
         request.app.state.worker_models[body.location] = body.models
+    if body.time_model is not None:
+        request.app.state.worker_time_model[body.location] = body.time_model
     got = lease_next(
         db, body.worker_id, body.modes, settings.worker_lease_seconds, body.job_id, body.location
     )

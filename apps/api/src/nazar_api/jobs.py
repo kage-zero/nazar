@@ -235,7 +235,9 @@ def snapshot(db: Session, job: JobRecord) -> Job:
             warnings, error, retryable, running = [], None, False, None
             estimate = None
         elif type_ is EventType.STAGE_STARTED and stage:
-            stages[stage] = StageState(stage=stage, state=StageRunState.RUNNING)
+            stages[stage] = StageState(
+                stage=stage, state=StageRunState.RUNNING, started_at=payload["ts"]
+            )
             running = stage
         elif type_ is EventType.STAGE_PROGRESS and stage:
             stages[stage] = stages[stage].model_copy(
@@ -248,6 +250,7 @@ def snapshot(db: Session, job: JobRecord) -> Job:
                 duration_s=data.get("duration_s"),
                 peak_vram_mib=data.get("peak_vram_mib"),
                 budget_mib=data.get("budget_mib"),
+                started_at=stages[stage].started_at,
             )
             running = None
         elif type_ is EventType.JOB_ESTIMATE:

@@ -18,6 +18,7 @@ from nazar_contracts import (
     ModelReadiness,
     ReadinessCheck,
     ReadinessResponse,
+    TimeModel,
     WorkerPresence,
 )
 
@@ -112,6 +113,7 @@ LOCATION_TEXT = {ComputeTarget.LOCAL: "local", ComputeTarget.COLLEGE: "college"}
 Seen = dict[ComputeTarget, datetime]
 Geometry = dict[ComputeTarget, GeometryBackend]
 Models = dict[ComputeTarget, list[ModelReadiness]]
+TimeModels = dict[ComputeTarget, TimeModel]
 
 
 def _age(seen: Seen, location: ComputeTarget) -> float | None:
@@ -174,7 +176,12 @@ def _gpu(seen: Seen, geometry: Geometry) -> ReadinessCheck:
     )
 
 
-def _presence(seen: Seen, geometry: Geometry, models: Models | None = None) -> list[WorkerPresence]:
+def _presence(
+    seen: Seen,
+    geometry: Geometry,
+    models: Models | None = None,
+    time_models: TimeModels | None = None,
+) -> list[WorkerPresence]:
     fresh = _fresh(seen)
     return [
         WorkerPresence(
@@ -183,6 +190,7 @@ def _presence(seen: Seen, geometry: Geometry, models: Models | None = None) -> l
             last_seen_s=None if (age := _age(seen, loc)) is None else round(age, 1),
             geometry=geometry.get(loc),
             models=(models or {}).get(loc),
+            time_model=(time_models or {}).get(loc),
         )
         for loc in ComputeTarget
     ]
@@ -193,6 +201,7 @@ def check_readiness(
     worker_seen_at: Seen | None = None,
     worker_geometry: Geometry | None = None,
     worker_models: Models | None = None,
+    worker_time_model: TimeModels | None = None,
 ) -> ReadinessResponse:
     seen, geometry = worker_seen_at or {}, worker_geometry or {}
     checks = [
@@ -206,5 +215,7 @@ def check_readiness(
     ]
     ready = all(c.status is CheckStatus.OK for c in checks if c.required)
     return ReadinessResponse(
-        ready=ready, checks=checks, workers=_presence(seen, geometry, worker_models)
+        ready=ready,
+        checks=checks,
+        workers=_presence(seen, geometry, worker_models, worker_time_model),
     )

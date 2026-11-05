@@ -51,10 +51,19 @@ export function applyEvent(job: Job, event: JobEvent): ApplyResult {
         warnings: [],
         error: null,
         retryable: false,
+        estimate: null,
       };
       break;
+    case 'job.estimate':
+      next = { ...next, estimate: event.data };
+      break;
     case 'stage.started':
-      if (event.stage) next.stages = setStage(next, { stage: event.stage, state: 'running' });
+      if (event.stage)
+        next.stages = setStage(next, {
+          stage: event.stage,
+          state: 'running',
+          started_at: event.ts,
+        });
       break;
     case 'stage.progress':
       if (event.stage) {
@@ -65,12 +74,17 @@ export function applyEvent(job: Job, event: JobEvent): ApplyResult {
       }
       break;
     case 'stage.completed':
-      if (event.stage)
+      if (event.stage) {
+        const stage = event.stage;
         next.stages = setStage(next, {
-          stage: event.stage,
+          stage,
           state: 'completed',
           duration_s: event.data.duration_s,
+          peak_vram_mib: event.data.peak_vram_mib ?? null,
+          budget_mib: event.data.budget_mib ?? null,
+          started_at: job.stages.find((s) => s.stage === stage)?.started_at ?? null,
         });
+      }
       break;
     case 'stage.skipped':
       if (event.stage)

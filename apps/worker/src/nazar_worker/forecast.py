@@ -24,6 +24,7 @@ from nazar_contracts import (
     JobEstimateData,
     ModelReadiness,
     StageName,
+    TimeModel,
 )
 from nazar_worker.fast3r import Fast3rRuntime
 from nazar_worker.gpu import GpuRuntime
@@ -204,6 +205,16 @@ class Forecast:
             )
         return JobEstimateData(
             frames=frames, basis=basis, stages=stages, total_s=round(sum(stages.values()), 1)
+        )
+
+    def time_model(self) -> TimeModel:
+        """Total time as a line in the frame count, fitted through two estimates."""
+        a, b = self.estimate(10, False), self.estimate(40, False)
+        per_frame = max(0.0, (b.total_s - a.total_s) / 30)
+        return TimeModel(
+            fixed_s=round(max(0.0, a.total_s - 10 * per_frame), 1),
+            per_frame_s=round(per_frame, 2),
+            basis=b.basis,
         )
 
     def record(self, stage: StageName, frames: int, seconds: float) -> None:

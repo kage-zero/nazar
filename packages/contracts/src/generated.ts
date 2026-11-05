@@ -559,6 +559,10 @@ export interface StageState {
    */
   reason?: string | null;
   stage: StageName;
+  /**
+   * When the stage started (server clock).
+   */
+  started_at?: string | null;
   state: StageRunState;
 }
 /**
@@ -1022,6 +1026,10 @@ export interface WorkerPresence {
    */
   models?: ModelReadiness[] | null;
   online: boolean;
+  /**
+   * Its time per frame, for estimates before a job (None: unknown).
+   */
+  time_model?: TimeModel | null;
 }
 /**
  * One model a worker can run: installed or not, and why not.
@@ -1034,6 +1042,18 @@ export interface ModelReadiness {
   name: string;
   ready: boolean;
   stage: StageName;
+}
+/**
+ * A worker's total job time as a straight line in the frame count, so the UI can quote an
+ * estimate before a job exists: `fixed_s + per_frame_s * frames` (no telemetry assumed).
+ *
+ * This interface was referenced by `NazarContracts`'s JSON-Schema
+ * via the `definition` "TimeModel".
+ */
+export interface TimeModel {
+  basis: string;
+  fixed_s: number;
+  per_frame_s: number;
 }
 /**
  * Computed from the normalised track. Times are seconds since the video started.
@@ -1180,5 +1200,9 @@ export interface WorkerLeaseRequest {
    * @minItems 1
    */
   modes: [PipelineMode, ...PipelineMode[]];
+  /**
+   * How long this worker takes per frame (absent: not reported).
+   */
+  time_model?: TimeModel | null;
   worker_id: string;
 }

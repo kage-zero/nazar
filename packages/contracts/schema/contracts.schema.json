@@ -2328,6 +2328,19 @@
         "stage": {
           "$ref": "#/$defs/StageName"
         },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the stage started (server clock)."
+        },
         "state": {
           "$ref": "#/$defs/StageRunState"
         }
@@ -2452,6 +2465,30 @@
         "end_s"
       ],
       "title": "TimeGap",
+      "type": "object"
+    },
+    "TimeModel": {
+      "additionalProperties": false,
+      "description": "A worker's total job time as a straight line in the frame count, so the UI can quote an\nestimate before a job exists: `fixed_s + per_frame_s * frames` (no telemetry assumed).",
+      "properties": {
+        "basis": {
+          "type": "string"
+        },
+        "fixed_s": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "per_frame_s": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "fixed_s",
+        "per_frame_s",
+        "basis"
+      ],
+      "title": "TimeModel",
       "type": "object"
     },
     "UserPublic": {
@@ -2885,6 +2922,18 @@
           "minItems": 1,
           "type": "array"
         },
+        "time_model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeModel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How long this worker takes per frame (absent: not reported)."
+        },
         "worker_id": {
           "maxLength": 64,
           "minLength": 1,
@@ -2944,6 +2993,18 @@
         },
         "online": {
           "type": "boolean"
+        },
+        "time_model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeModel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its time per frame, for estimates before a job (None: unknown)."
         }
       },
       "required": [

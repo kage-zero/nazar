@@ -21,6 +21,7 @@ from nazar_contracts import (
     ModelReadiness,
     PipelineMode,
     StageName,
+    TimeModel,
     WorkerEvent,
     WorkerLease,
 )
@@ -270,6 +271,12 @@ def _models_report(modes: list[PipelineMode], client: WorkerClient) -> list[Mode
     return model_readiness(for_location(client.location), GpuRuntime.from_env())
 
 
+def _time_model(modes: list[PipelineMode], client: WorkerClient) -> TimeModel | None:
+    if PipelineMode.STANDARD not in modes:
+        return None
+    return Forecast.for_worker(for_location(client.location)).time_model()
+
+
 def geometry_backend(modes: list[PipelineMode]) -> GeometryBackend | None:
     """Reported on every lease so readiness shows what standard jobs would use."""
     if PipelineMode.STANDARD not in modes:
@@ -296,7 +303,11 @@ def run_loop(
     while not stop():
         try:
             lease = client.lease(
-                worker_id, modes, geometry_backend(modes), models=_models_report(modes, client)
+                worker_id,
+                modes,
+                geometry_backend(modes),
+                models=_models_report(modes, client),
+                time_model=_time_model(modes, client),
             )
         except ApiCallFailed as exc:
             log.warning("lease request failed: %s", exc)
