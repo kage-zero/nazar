@@ -26,6 +26,8 @@ export default function SplatLayer({
 
   useEffect(() => {
     const created = new SparkRenderer({ renderer: gl });
+    // An external GPU object with a lifetime: it is created and disposed with this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSpark(created);
     return () => {
       setSpark(null);

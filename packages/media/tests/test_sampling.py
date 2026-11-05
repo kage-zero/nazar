@@ -1,6 +1,7 @@
 """Frame sampling at a chosen rate."""
 
 import pytest
+
 from nazar_contracts import FrameFlag, FrameSeries, KeyframeReason
 from nazar_media import MediaError
 from nazar_media.sampling import count_frames, plan_frames
@@ -43,9 +44,7 @@ def test_each_window_takes_its_sharpest_central_frame() -> None:
 def test_unusable_frames_are_never_picked() -> None:
     sharp = [1.0] * 101
     sharp[5] = 100.0
-    plan = plan_frames(
-        series(101, sharp=sharp, flags={5: [FrameFlag.BLURRY]}), fps=1.0, cap=64
-    )
+    plan = plan_frames(series(101, sharp=sharp, flags={5: [FrameFlag.BLURRY]}), fps=1.0, cap=64)
     assert plan.keyframes[0].index != 5
 
 

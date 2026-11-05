@@ -1,6 +1,16 @@
 # Implementation status
 
-_Last updated: 2026-11-04_
+_Last updated: 2026-11-05_
+
+## Latest: **Frontend connected to the full pipeline (branch `feature/frontend-pipeline`, 2026-11-05)**
+
+Built: per-job frames-per-second (0.25 to 4, default 1; API samples the sharpest usable frame per time window, caps 64 local / 128 college, 422 below 3 frames); `job.estimate` events and a worker time forecast (cost model fitted to the measured run, calibrated from stored real durations, plus a pre-run `TimeModel` and model readiness advertised through the lease); live run screen (step N of 7, model, counts, elapsed, time-left range, basis); pipeline cards with forecast vs. real time and GPU peak vs. budget; per-model contributions from the report; viewer layers for the Gaussian splat (Spark 2.4.0, lazy chunk) and the vertex-coloured mesh with toggles, mesh measuring, and a sticky fixed-height viewer. Web libs (`sampling`, `estimate`, `contributions`) are unit-tested.
+
+Verified in a real browser run (isolated storage, local GPU worker, `sample1.mp4`, 1 fps, 23 frames): finished in 8.4 min, peak GPU 4.6 GB of 5.5 GB, all six models contributed, no console errors, splat and mesh load and align with the points (splat verified on the RTX 4050 through Chromium/ANGLE).
+
+Found and fixed by that run: the splat never drew (a disposed `SparkRenderer` was reused after React's development double-invoke); the fuse-and-splat bar jumped from 98 % to 6 % and the time left from 26 s to 9 minutes (fusion and splat progress count different things; now mapped to the stage's share); the pre-run estimate was low (4-5 min against 8.4) because the calibration history held splat-less 0.06 s "dense" runs (now kept apart and implausible ratios ignored). The corrected estimate has not been re-timed on a second full run.
+
+Not done: local frame cap of 64 untested at high fps on 6 GB; college profile weights (about 6.5 GB) not downloaded and its forecast unmeasured; Metric3D scale still reported, not applied; no texture baking, so the mesh stays vertex-coloured. See [`DEMO.md`](DEMO.md).
 
 ## Current milestone: **Full model pipeline (branch `feature/full-pipeline`) — video in, explainable 3D model out**
 
