@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useApiStatus } from './api/useApiStatus';
 import { useJob } from './api/useJob';
 import { useMissions } from './api/useMissions';
+import { usePreflight } from './api/usePreflight';
 import { useSession } from './api/useSession';
 import { AuthCard } from './components/AuthCard';
 import { Header } from './components/Header';
@@ -23,6 +24,7 @@ export function App() {
   const readyVideo = missions.selected?.video?.status === 'ready' ? missions.selected.video : null;
   const signedInMission = session.state === 'signed-in' ? (missions.selected?.id ?? null) : null;
   const job = useJob(signedInMission);
+  const preflight = usePreflight(readyVideo?.id ?? null);
   const setLayers = useViewerStore((s) => s.setLayers);
   const cloud = displayCloud(job.job);
   const path = job.job?.artifacts.find((a) => a.kind === 'camera_trajectory') ?? null;
@@ -94,6 +96,7 @@ export function App() {
                     ? (status.readiness.workers ?? [])
                     : []
                 }
+                report={preflight}
                 onStart={job.start}
                 onCancel={job.cancel}
                 onRetry={job.retry}
