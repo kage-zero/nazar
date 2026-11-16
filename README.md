@@ -47,6 +47,7 @@ uv run --package nazar-worker nazar-worker doctor   # read-only GPU/disk/toolcha
 ## Documentation
 
 - Source documents (unchanged): [project brief](docs/Single_Pass_Drone_3D_Reconstruction_Detailed_Project_Documentation.md), [design guide](docs/DESIGN.md), [SyncVDI guide](docs/SyncAI-VDI%20User%20Guide.pdf), [build prompt](docs/Claude_Prompt_Single_Pass_Drone_3D_Reconstruction.md), sample videos in `docs/sample/video/`
+- **[Complete project documentation](docs/NAZAR_PROJECT_DOCUMENTATION.md)**: architecture, pipeline, models, configuration, testing, quality-tuning history, measured results and limits
 - [Full Pipeline Completion Roadmap](docs/pipeline-completion/README.md) — step-by-step guides for surface meshing (Open3D), depth priors (Metric3D-v2), dynamic masks (YOLO+SAM2) and Gaussian splatting
 - [Demo guide](docs/DEMO.md) · [Implementation status](docs/IMPLEMENTATION_STATUS.md) · [Environment setup](docs/ENVIRONMENT_SETUP.md)
 - [Architecture](docs/architecture/overview.md) · [Testing](docs/testing/README.md) · [Research](docs/research/README.md)
