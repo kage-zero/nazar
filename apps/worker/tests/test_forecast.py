@@ -18,16 +18,18 @@ def forecast(profile=LOCAL, ready=None, cpu=False, store=None) -> Forecast:  # t
 
 def test_default_estimate_matches_the_measured_local_run() -> None:
     est = forecast().estimate(22, telemetry=False)
-    # sample1, 22 frames, idle RTX 4050: ~6 s masks, ~26 s Fast3R, ~54 s depth, ~5 min splat.
+    # sample1, 22 frames, idle RTX 4050: ~6 s masks, ~26 s Fast3R, ~54 s depth; the splat
+    # (2,500 iterations with adaptive densification, ~0.25 s each on this card) dominates at
+    # ~12 min.
     assert est.stages[StageName.DYNAMIC_ANALYSIS] == pytest.approx(6.3, abs=1.5)
     assert est.stages[StageName.GEOMETRY] == pytest.approx(26, abs=4)
     assert est.stages[StageName.DEPTH_PRIORS] == pytest.approx(53, abs=6)
-    assert 270 < est.stages[StageName.DENSE_RECONSTRUCTION] < 330
+    assert 650 < est.stages[StageName.DENSE_RECONSTRUCTION] < 800
     # The height-map surface + texture bake is NOT yet measured (the old Poisson step was
     # ~22 s); this pins the current estimate until a real run calibrates it.
     assert 40 < est.stages[StageName.SURFACE_PROCESSING] < 130
     assert est.stages[StageName.SENSOR_OPTIMIZATION] == 0  # no telemetry: skipped
-    assert 6 * 60 < est.total_s < 9.5 * 60
+    assert 13 * 60 < est.total_s < 18 * 60
     assert "RTX 4050" in est.basis
 
 

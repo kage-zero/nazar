@@ -9,7 +9,8 @@ GPU. Steps:
 2. Screened Poisson reconstruction.
 3. Trim what the input does not support: low Poisson density, and any vertex farther than
    `--max-gap` point spacings from every input point (Poisson's "bubbles").
-4. Clean-up, small disconnected pieces dropped, then Taubin smoothing (volume-preserving).
+4. Clean-up, small disconnected pieces dropped, Taubin smoothing (volume-preserving), then
+   quadric decimation to `--max-triangles`.
 5. Per-vertex colour (nearest input points) and confidence class: observed / estimated from
    the nearest input point's class when the vertex lies on the data, inferred when it bridges
    a gap between data (more than `--inferred-gap` spacings from any input point).
@@ -34,11 +35,12 @@ def main() -> int:
     ap.add_argument("--cloud", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--depth", type=int, default=9)
-    ap.add_argument("--density-quantile", type=float, default=0.03)
+    ap.add_argument("--density-quantile", type=float, default=0.10)
     ap.add_argument("--max-gap", type=float, default=6.0)
     ap.add_argument("--inferred-gap", type=float, default=2.5)
     ap.add_argument("--min-component", type=float, default=0.02)
-    ap.add_argument("--smooth-iterations", type=int, default=20)
+    ap.add_argument("--smooth-iterations", type=int, default=40)
+    ap.add_argument("--max-triangles", type=int, default=1_200_000)
     args = ap.parse_args()
 
     import open3d as o3d
@@ -95,6 +97,13 @@ def main() -> int:
         # Per-pixel depth noise makes Poisson surfaces lumpy; Taubin smoothing flattens that
         # without shrinking the shape (unlike plain Laplacian smoothing).
         mesh = mesh.filter_smooth_taubin(number_of_iterations=args.smooth_iterations)
+    decimated_from = len(mesh.triangles)
+    if args.max_triangles > 0 and decimated_from > args.max_triangles:
+        # A fine Poisson grid keeps detail; decimating *after* smoothing keeps the file light
+        # enough for the browser without bringing the lumps back.
+        mesh = mesh.simplify_quadric_decimation(target_number_of_triangles=args.max_triangles)
+        mesh.remove_degenerate_triangles()
+        mesh.remove_unreferenced_vertices()
     mesh.compute_vertex_normals()
 
     v = np.asarray(mesh.vertices)
@@ -122,6 +131,7 @@ def main() -> int:
         normals_flipped_to_camera=int(flip.sum()),
         poisson_depth=args.depth,
         smooth_iterations=args.smooth_iterations,
+        decimated_from_triangles=decimated_from,
         poisson_vertices=poisson_vertices,
         removed_low_density=int(low.sum()),
         removed_unsupported=int((far & ~low).sum()),
