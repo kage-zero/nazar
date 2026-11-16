@@ -86,7 +86,9 @@ def test_fuse_attaches_normals_fills_holes_and_skips_moving_pixels(tmp_path: Pat
     assert (fused.source == SOURCE_FAST3R).sum() == kept
     filled = int((fused.source == SOURCE_DEPTH).sum())
     holes = int(((data["conf"] < 3) & ~data["dyn"]).sum())
-    assert filled == holes  # every low-confidence pixel lies inside the observed depth range
+    # Only holes that sit next to real Fast3R points and agree with their depth are filled;
+    # isolated low-confidence regions stay empty rather than inventing floaters.
+    assert 0 < filled <= holes
     assert fused.stats["moving_object_pixels_excluded"] == int(data["dyn"].sum())
     # Filled points lie on the same plane as Fast3R's (z = 10 m = 5 units).
     assert np.allclose(fused.points[:, 2], 10 * UNITS_PER_METRE, atol=1e-6)
@@ -94,6 +96,17 @@ def test_fuse_attaches_normals_fills_holes_and_skips_moving_pixels(tmp_path: Pat
     assert np.allclose(fused.normals, [0, 0, -1])
     assert abs(fused.stats["metres_per_unit_estimated"] - 1 / UNITS_PER_METRE) < 1e-6
     assert fused.stats["scale_spread_rel"] < 1e-6
+
+
+def test_fill_never_invents_sky(tmp_path: Path) -> None:
+    path, priors = _scene(tmp_path)
+    data = dict(np.load(path))
+    data["rgb"] = np.tile(np.array([120, 150, 220], np.uint8), (*data["rgb"].shape[:-1], 1))
+    sky_path = tmp_path / "sky.npz"
+    np.savez(sky_path, **data)
+    tf = FrameTransform(1.0, np.eye(3), np.zeros(3))
+    fused = fuse(sky_path, tf, keep_thr=3.0, priors=priors, max_points=10_000_000)
+    assert not (fused.source == SOURCE_DEPTH).any()
 
 
 def test_fuse_without_priors_keeps_only_fast3r(tmp_path: Path) -> None:

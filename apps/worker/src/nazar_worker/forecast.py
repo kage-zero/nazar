@@ -99,8 +99,8 @@ LOCAL_COST: dict[StageName, tuple[float, float]] = {
     StageName.ANALYSIS: (0.2, 0.0),
     StageName.EXPORTING: (0.4, 0.03),
 }
-SPLAT_SETUP_S = 25.0
-SPLAT_S_PER_ITERATION = 0.0645
+SPLAT_SETUP_S = 90.0
+SPLAT_S_PER_ITERATION = 0.25
 CPU_BASELINE_COST = {StageName.GEOMETRY: (10.0, 1.6), StageName.DENSE_RECONSTRUCTION: (1.0, 0.1)}
 COLLEGE_SPEEDUP = 0.4
 """Assumed GPU speed-up of the college card over the 4050 laptop (not measured)."""

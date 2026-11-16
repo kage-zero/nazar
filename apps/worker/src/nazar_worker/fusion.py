@@ -35,6 +35,10 @@ SOURCE_FAST3R, SOURCE_DEPTH = 0, 1
 MAX_VIEW_REL_ERR = 0.15
 """A view's prior is used for fill only when it agrees with Fast3R to this median rel. error."""
 MIN_AGREEING_PIXELS = 500
+MIN_VIEW_COS = 0.2
+"""Fast3R points on a surface seen more edge-on than this (|cos| of the angle between the prior
+normal and the viewing ray, about 78 degrees) are dropped: the pixel grid stretches there into
+sparse parallel stripes that other views do not cover, and they never mesh into a clean surface."""
 
 
 @dataclass
@@ -101,6 +105,43 @@ def view_scales(data: Any, keep: npt.NDArray[np.bool_], priors: Priors) -> dict[
     return {"views": out}
 
 
+FILL_WINDOW = 7
+"""Half-size (grid pixels) of the neighbourhood a fill pixel must share with real Fast3R points."""
+FILL_MIN_SUPPORT = 0.2
+"""Fraction of that neighbourhood that must be real Fast3R points."""
+FILL_DEPTH_TOL = 0.08
+"""Prior depth must be within this relative distance of the neighbouring Fast3R depth."""
+
+
+def _box_sum(a: F64, r: int) -> F64:
+    """Sum of `a` over a (2r+1)^2 window (zero padded), via an integral image."""
+    pad = np.pad(a, ((r + 1, r), (r + 1, r)))
+    c = pad.cumsum(0).cumsum(1)
+    n = 2 * r + 1
+    out: F64 = c[n:, n:] - c[:-n, n:] - c[n:, :-n] + c[:-n, :-n]
+    return out
+
+
+def _fillable(keep: npt.NDArray[np.bool_], z: F64, rgb: U8, d: F64) -> npt.NDArray[np.bool_]:
+    """Where the depth prior may fill a Fast3R hole without inventing floaters.
+
+    Filling every low-confidence pixel from the prior adds sky and smeared depth edges, which
+    buries the real scene. A pixel qualifies only if (1) enough real Fast3R points lie around it,
+    (2) the prior depth agrees with their mean depth, and (3) it is not sky-coloured.
+    """
+    kf = keep.astype(np.float64)
+    support = _box_sum(kf, FILL_WINDOW) / float((2 * FILL_WINDOW + 1) ** 2)
+    zsum = _box_sum(kf * z, FILL_WINDOW)
+    ksum = _box_sum(kf, FILL_WINDOW)
+    local = np.divide(zsum, ksum, out=np.zeros_like(zsum), where=ksum > 0)
+    agrees = np.abs(d - local) <= FILL_DEPTH_TOL * np.maximum(local, 1e-9)
+    near = (support >= FILL_MIN_SUPPORT) & agrees
+    c = rgb.astype(np.int16)
+    sky = (c[..., 2] > c[..., 0] + 12) & (c[..., 2] >= c[..., 1])
+    out: npt.NDArray[np.bool_] = near & ~sky
+    return out
+
+
 def fuse(
     npz: Path,
     tf: FrameTransform,
@@ -125,9 +166,21 @@ def fuse(
     agree = {v: s for v, s in scales["views"].items() if s["median_rel_err"] <= MAX_VIEW_REL_ERR}
     filled = 0
     with_normal = 0
+    grazing_dropped = 0
     for v, kf in enumerate(views):
         rot = data["c2w"][v][:3, :3]
         k = keep[v]
+        if priors is not None and kf in priors.normals:
+            xg, yg = _pixel_grid(data, v)
+            ncam = _sample(priors.normals[kf], xg, yg).astype(np.float64)
+            ray = data["pts"][v].reshape(-1, 3) - data["c2w"][v][:3, 3]
+            ray = (ray / np.maximum(np.linalg.norm(ray, axis=1, keepdims=True), 1e-12)).reshape(
+                ncam.shape
+            )
+            cos = np.abs(np.einsum("hwc,hwc->hw", ncam @ rot.T, ray))
+            grazing = k & (cos < MIN_VIEW_COS)
+            grazing_dropped += int(grazing.sum())
+            k = k & ~grazing
         p = data["pts"][v][k].astype(np.float64)
         n = np.zeros_like(p)
         x = y = None
@@ -150,7 +203,10 @@ def fuse(
         w2c = np.linalg.inv(data["c2w"][v])
         cam = data["pts"][v][k].astype(np.float64) @ w2c[:3, :3].T + w2c[:3, 3]
         lo, hi = np.percentile(cam[:, 2], 1), np.percentile(cam[:, 2], 99)
+        zgrid = np.zeros(k.shape, np.float64)
+        zgrid[k] = cam[:, 2]
         hole &= (d >= 0.95 * lo) & (d <= 1.05 * hi)
+        hole &= _fillable(k, zgrid, data["rgb"][v], d)
         if not hole.any():
             continue
         h_in, w_in = conf.shape[1:]
@@ -182,6 +238,7 @@ def fuse(
     source = np.concatenate(src_l)
     stats.update(
         depth_prior_filled=filled,
+        grazing_points_dropped=grazing_dropped,
         samples_with_prior_normal=int(has_n.sum()),
     )
     if priors is not None:

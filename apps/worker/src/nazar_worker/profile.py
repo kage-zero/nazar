@@ -56,11 +56,11 @@ LOCAL = ComputeProfile(
     sam2_checkpoint="sam2.1_hiera_small.pt",
     sam2_config="configs/sam2.1/sam2.1_hiera_s.yaml",
     metric3d_models=("vit_large", "vit_small"),
-    poisson_depth=9,
+    poisson_depth=10,
     max_fused_points=600_000,
-    splat_iterations=4000,
-    splat_max_gaussians=400_000,
-    splat_sh_degree=1,
+    splat_iterations=2500,
+    splat_max_gaussians=800_000,
+    splat_sh_degree=2,
 )
 
 CLG = ComputeProfile(

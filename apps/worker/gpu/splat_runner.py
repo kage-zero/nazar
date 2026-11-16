@@ -28,6 +28,19 @@ import numpy as np
 from _common import Timer, budget, emit, is_oom, log, peak, run_main
 
 SH_C0 = 0.28209479177387814
+FLOATER_SPACINGS = 20.0
+FLOATER_SIZE_RATIO = 5.0
+"""After training, Gaussians that are both farther than FLOATER_SPACINGS point-spacings from
+every point of the input cloud and larger than FLOATER_SIZE_RATIO times the median Gaussian are
+removed: big blobs the photometric loss placed where no geometry was observed. Normal-sized
+Gaussians in unsupported areas are kept; they explain real surfaces the cloud missed (windows,
+bright appliances), and removing them cuts black holes into the scene."""
+INIT_GAUSSIANS = 400_000
+"""Gaussians seeded from the cloud; the rest of the budget is grown where detail is missing."""
+MAX_AXIS_RATIO = 4.0
+"""Gaussians whose longest axis exceeds this multiple of their shortest are penalised: without
+it they stretch into long needles across weakly-observed surfaces. Adaptive densification
+(below) adds Gaussians where detail is missing instead."""
 
 
 def ssim(a: Any, b: Any) -> Any:
@@ -98,7 +111,7 @@ class Scene:
         from gsplat import rasterization
 
         p = self.params
-        colors, _, _ = rasterization(
+        colors, _, info = rasterization(
             means=p["means"],
             quats=torch.nn.functional.normalize(p["quats"], dim=-1),
             scales=torch.exp(p["scales"]),
@@ -111,7 +124,7 @@ class Scene:
             sh_degree=sh,
             packed=True,
         )
-        return colors[..., :3].clamp(0, 1)
+        return colors[..., :3].clamp(0, 1), info
 
     def keep(self, mask: Any) -> None:
         """Drop Gaussians (and their optimiser state) where mask is False."""
@@ -214,10 +227,15 @@ def main() -> int:
 
     data = np.load(args.points)
     xyz, rgb = data["points"].astype(np.float32), data["colors"].astype(np.float32)
-    if len(xyz) > args.max_gaussians:
-        pick = rng.choice(len(xyz), args.max_gaussians, replace=False)
+    init_n = min(args.max_gaussians, INIT_GAUSSIANS)
+    if len(xyz) > init_n:
+        pick = rng.choice(len(xyz), init_n, replace=False)
         xyz, rgb = xyz[pick], rgb[pick]
-    scene = Scene(xyz, rgb, args.sh_degree, scene_scale)
+    # Densification thresholds and the position learning rate are relative to the size of the
+    # scene, not of the camera path: a drone clip that barely moves still films a large scene.
+    extent = float(np.percentile(np.linalg.norm(xyz - np.median(xyz, axis=0), axis=1), 90))
+    extent_scale = max(extent, scene_scale)
+    scene = Scene(xyz, rgb, args.sh_degree, extent_scale)
     pose_delta = torch.zeros(len(cams), 6, device="cuda", requires_grad=True)
     pose_opt = torch.optim.Adam([pose_delta], lr=1e-4)
     emit(
@@ -241,11 +259,29 @@ def main() -> int:
     def loss_for(i: int, sh: int) -> Any:
         img = images[i]
         h, w = img.shape[:2]
-        out = scene.render(viewmat([i]), ks[[i]], w, h, sh)[0]
+        out, info = scene.render(viewmat([i]), ks[[i]], w, h, sh)
+        out = out[0]
+        loss_for.info = info  # type: ignore[attr-defined]
         m = masks[i] if masks[i] is not None else torch.ones_like(img[..., :1])
         l1 = ((out - img).abs() * m).sum() / (m.sum() * 3 + 1e-6)
         s = ssim((out * m).permute(2, 0, 1)[None], (img * m).permute(2, 0, 1)[None])
         return 0.8 * l1 + 0.2 * (1 - s), out
+
+    from gsplat.strategy import DefaultStrategy
+
+    strategy = DefaultStrategy(
+        refine_start_iter=min(300, args.iterations // 10),
+        refine_stop_iter=int(args.iterations * 0.6),
+        refine_every=100,
+        reset_every=max(1000, args.iterations // 8),
+        grow_grad2d=0.0002,
+        prune_scale3d=0.1,
+        verbose=False,
+    )
+    strategy.check_sanity(scene.params, scene.opt)
+    strategy_state = strategy.initialize_state(scene_scale=extent_scale)
+    densify = args.max_gaussians > len(xyz)
+    """Adaptive densification runs when there is headroom between the start and the cap."""
 
     recent: list[float] = []
     it, oom_retries = 0, 0
@@ -254,6 +290,12 @@ def main() -> int:
             sh = min(args.sh_degree, it // 1000)
             i = train[int(rng.integers(len(train)))]
             loss, out = loss_for(i, sh)
+            info = loss_for.info  # type: ignore[attr-defined]
+            sc = scene.params["scales"]
+            spread = sc.max(1).values - sc.min(1).values
+            loss = loss + 0.05 * torch.relu(spread - math.log(MAX_AXIS_RATIO)).mean()
+            if densify:
+                strategy.step_pre_backward(scene.params, scene.opt, strategy_state, it, info)
             loss.backward()
             frac = it / max(args.iterations, 1)
             for g in scene.opt["means"].param_groups:
@@ -261,16 +303,17 @@ def main() -> int:
             for opt in scene.opt.values():
                 opt.step()
                 opt.zero_grad(set_to_none=True)
+            if densify:
+                if len(scene.params["means"]) >= args.max_gaussians:
+                    strategy.refine_stop_iter = min(strategy.refine_stop_iter, it)
+                strategy.step_post_backward(
+                    scene.params, scene.opt, strategy_state, it, info, packed=True
+                )
             if it > 200:  # let the colours settle before the poses move
                 pose_opt.step()
             pose_opt.zero_grad(set_to_none=True)
             if it >= args.iterations - 200:
                 recent.append(psnr(out.detach(), images[i]))
-            if it % 500 == 499 and len(scene.params["means"]) > 1000:
-                with torch.no_grad():
-                    alive = torch.sigmoid(scene.params["opacities"]) > 0.005
-                if not bool(alive.all()):
-                    scene.keep(alive)
             it += 1
             if it % 250 == 0 or it == args.iterations:
                 emit(
@@ -294,6 +337,8 @@ def main() -> int:
                 mask = torch.zeros_like(scene.params["opacities"], dtype=torch.bool)
                 mask[order[: len(order) // 2]] = True
             scene.keep(mask)
+            strategy_state = strategy.initialize_state(scene_scale=extent_scale)
+            densify = False  # no more growth once the budget has been hit
             torch.cuda.empty_cache()
             emit(
                 event="retry",
@@ -301,6 +346,19 @@ def main() -> int:
                 gaussians=len(scene.params["means"]),
             )
     train_s = timer.s()
+
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(xyz)
+    spacing = float(np.median(tree.query(xyz, k=2)[0][:, 1]))
+    with torch.no_grad():
+        near = tree.query(scene.params["means"].detach().cpu().numpy())[0]
+        size = torch.exp(scene.params["scales"].detach()).max(1).values
+        big = (size > FLOATER_SIZE_RATIO * size.median()).cpu().numpy()
+        supported = torch.tensor(~((near > FLOATER_SPACINGS * spacing) & big), device="cuda")
+    floaters = int((~supported).sum())
+    if floaters:
+        scene.keep(supported)
 
     # Held-out views: align only their pose (Gaussians frozen), then score.
     for p in scene.params.values():
@@ -342,6 +400,7 @@ def main() -> int:
         test_psnr_db=round(float(np.mean(test_psnr)), 2) if test_psnr else None,
         pose_refinement_mean_shift=round(float(drift.mean()), 5),
         oom_retries=oom_retries,
+        floaters_removed=floaters,
         timings={"train_s": train_s, "total_s": timer.s()},
         **peak(),
     )
